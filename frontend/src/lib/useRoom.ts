@@ -12,6 +12,7 @@ import {
   type TransportState,
 } from '@tabjam/shared';
 import { getDeviceId, getDeviceName, setDeviceName } from './device';
+import { ClockSync, RESYNC_INTERVAL_MS, estimateClockOffset } from './clock';
 
 type TabJamSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -19,6 +20,15 @@ export interface Notice {
   id: number;
   level: 'info' | 'warn' | 'error';
   message: string;
+}
+
+export interface ChirpAnnouncement {
+  chirpId: string;
+  emitAtServerTime: number;
+  startHz: number;
+  endHz: number;
+  durationMs: number;
+  fromDeviceId: string;
 }
 
 export interface RoomApi {
@@ -46,6 +56,21 @@ export interface RoomApi {
   updateSettings: (patch: Partial<RoomSettings>) => void;
   claimAudioOutput: () => void;
   releaseAudioOutput: () => void;
+
+  /** Server/client clock estimate, shared with the calibration code. */
+  clock: ClockSync;
+  clockSynced: boolean;
+
+  /** Publish this device's measured speaker latency to the room. */
+  sendCalibration: (outputLatencyMs: number | null) => void;
+  announceChirp: (payload: Omit<ChirpAnnouncement, 'fromDeviceId'>) => void;
+  sendChirpHeard: (payload: {
+    chirpId: string;
+    offsetMs: number;
+    confidence: number;
+  }) => void;
+  /** Subscribe to chirp announcements from the audio-output device. */
+  onChirpScheduled: (handler: (announcement: ChirpAnnouncement) => void) => () => void;
 }
 
 /**
@@ -71,6 +96,13 @@ export function useRoom(roomId: string): RoomApi {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [audioOutputDeviceId, setAudioOutputDeviceId] = useState<string | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
+
+  const clockRef = useRef(new ClockSync());
+  const [clockSynced, setClockSynced] = useState(false);
+  // Chirp announcements are delivered to subscribers rather than through state:
+  // they are one-shot events with a hard deadline, and a re-render would be a
+  // needless detour on the way to arming the microphone.
+  const chirpHandlers = useRef(new Set<(a: ChirpAnnouncement) => void>());
 
   const pushNotice = useCallback((level: Notice['level'], message: string) => {
     const notice: Notice = { id: Date.now() + Math.random(), level, message };
@@ -109,10 +141,26 @@ export function useRoom(roomId: string): RoomApi {
       });
     };
 
+    let resyncTimer: ReturnType<typeof setInterval> | null = null;
+
+    const syncClock = () => {
+      void estimateClockOffset(socket).then((estimate) => {
+        if (estimate) {
+          clockRef.current.update(estimate);
+          setClockSynced(true);
+        }
+      });
+    };
+
     socket.on('connect', () => {
       setConnected(true);
       // Re-join on every connect, including reconnects after a wifi drop.
       join();
+      // Clocks are re-estimated after a reconnect: the device may have slept,
+      // and a stale offset is worse than none.
+      syncClock();
+      if (resyncTimer) clearInterval(resyncTimer);
+      resyncTimer = setInterval(syncClock, RESYNC_INTERVAL_MS);
     });
     socket.on('disconnect', () => {
       setConnected(false);
@@ -132,8 +180,12 @@ export function useRoom(roomId: string): RoomApi {
       setAudioOutputDeviceId(next);
     });
     socket.on('notice', ({ level, message }) => pushNotice(level, message));
+    socket.on('chirpScheduled', (announcement) => {
+      for (const handler of chirpHandlers.current) handler(announcement);
+    });
 
     return () => {
+      if (resyncTimer) clearInterval(resyncTimer);
       socket.removeAllListeners();
       socket.disconnect();
       socketRef.current = null;
@@ -182,5 +234,16 @@ export function useRoom(roomId: string): RoomApi {
     updateSettings: (patch) => emit('updateSettings', patch),
     claimAudioOutput: () => emit('claimAudioOutput'),
     releaseAudioOutput: () => emit('releaseAudioOutput'),
+
+    clock: clockRef.current,
+    clockSynced,
+
+    sendCalibration: (outputLatencyMs) => emit('calibration', { outputLatencyMs }),
+    announceChirp: (payload) => emit('announceChirp', payload),
+    sendChirpHeard: (payload) => emit('chirpHeard', payload),
+    onChirpScheduled: (handler) => {
+      chirpHandlers.current.add(handler);
+      return () => chirpHandlers.current.delete(handler);
+    },
   };
 }

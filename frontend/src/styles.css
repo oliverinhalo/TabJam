@@ -394,3 +394,39 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 
   .topbar__center { align-items: flex-start; }
 }
+
+/* --- Calibration panel --------------------------------------------------- */
+
+.pill {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.pill--ok { background: rgba(74, 222, 128, 0.14); color: var(--ok); }
+.pill--warn { background: rgba(240, 168, 72, 0.14); color: var(--accent); }
+
+.alert--warn { background: rgba(240, 168, 72, 0.12); color: var(--accent); }
+
+.metrics {
+  margin: 0 0 14px;
+  display: grid;
+  gap: 6px;
+}
+.metrics > div { display: flex; justify-content: space-between; align-items: baseline; }
+.metrics dt {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.metrics dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The panel stacks two full-width actions under the metrics. */
+.panel .button + .button { margin-top: 8px; }
+.field--row .button { flex: 1; margin-top: 0; }

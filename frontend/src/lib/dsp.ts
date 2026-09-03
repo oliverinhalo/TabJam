@@ -1,0 +1,204 @@
+/**
+ * Signal processing for acoustic calibration.
+ *
+ * Deliberately free of browser APIs: everything here is plain arrays and maths,
+ * so the detector can be tested against synthetic signals without a browser or
+ * a microphone (see scripts/test-dsp.mjs).
+ */
+
+export interface ChirpSpec {
+  startHz: number;
+  endHz: number;
+  durationMs: number;
+}
+
+/**
+ * Audible default.
+ *
+ * 1.5–4.5kHz sits where small phone speakers and microphones are most
+ * sensitive, and it is short enough to read as a blip rather than a beep.
+ * Near-ultrasonic alternatives are tempting because they are unobtrusive, but
+ * cheap phone hardware rolls off above ~18kHz, so they fail on exactly the
+ * devices most people bring to a practice.
+ */
+export const DEFAULT_CHIRP: ChirpSpec = {
+  startHz: 1500,
+  endHz: 4500,
+  durationMs: 50,
+};
+
+/** Higher, less obtrusive variant. Works on some hardware; test before relying on it. */
+export const HIGH_CHIRP: ChirpSpec = {
+  startHz: 12000,
+  endHz: 16000,
+  durationMs: 50,
+};
+
+/**
+ * Build a linear frequency sweep.
+ *
+ * A sweep is used rather than a tone because its autocorrelation is a sharp
+ * spike: a matched filter locks onto it to within a sample or two, where a
+ * fixed tone would give a broad, ambiguous correlation ridge.
+ *
+ * The Hann window matters for more than tidiness — an abrupt start would put a
+ * broadband click at the edges, and the detector would happily lock onto the
+ * click instead of the sweep.
+ */
+export function generateChirp(spec: ChirpSpec, sampleRate: number): Float32Array {
+  const length = Math.max(1, Math.round((spec.durationMs / 1000) * sampleRate));
+  const samples = new Float32Array(length);
+  const duration = length / sampleRate;
+  const sweepRate = (spec.endHz - spec.startHz) / duration;
+
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate;
+    // Phase of a linear sweep is the integral of instantaneous frequency.
+    const phase = 2 * Math.PI * (spec.startHz * t + (sweepRate * t * t) / 2);
+    const window = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (length - 1 || 1)));
+    samples[i] = Math.sin(phase) * window;
+  }
+  return samples;
+}
+
+/** Box-average decimation. Cheap, and it improves SNR as a side effect. */
+export function decimate(signal: Float32Array, factor: number): Float32Array {
+  if (factor <= 1) return signal;
+  const length = Math.floor(signal.length / factor);
+  const out = new Float32Array(length);
+  for (let i = 0; i < length; i++) {
+    let sum = 0;
+    const base = i * factor;
+    for (let j = 0; j < factor; j++) sum += signal[base + j];
+    out[i] = sum / factor;
+  }
+  return out;
+}
+
+export interface DetectionResult {
+  /** Index into the recording where the reference starts. -1 if not found. */
+  sampleIndex: number;
+  /** Correlation peak relative to background. Higher means more certain. */
+  confidence: number;
+}
+
+/**
+ * Normalised cross-correlation of `reference` against `signal`.
+ *
+ * Normalising by the signal window's energy makes the score independent of how
+ * loud the chirp came back, which matters because playback volume, distance
+ * and mic gain all vary. Without it, a loud burst of unrelated noise could
+ * outscore a correctly matched but quiet chirp.
+ *
+ * Returns the score at every lag from 0 to `maxLag`.
+ */
+export function correlate(
+  signal: Float32Array,
+  reference: Float32Array,
+  maxLag: number
+): Float32Array {
+  const m = reference.length;
+  const lags = Math.max(0, Math.min(maxLag, signal.length - m));
+  const scores = new Float32Array(lags);
+
+  // Running energy of the signal window, so each lag is O(m) not O(m) + O(m).
+  let energy = 0;
+  for (let i = 0; i < m && i < signal.length; i++) energy += signal[i] * signal[i];
+
+  for (let lag = 0; lag < lags; lag++) {
+    let dot = 0;
+    for (let i = 0; i < m; i++) dot += signal[lag + i] * reference[i];
+
+    scores[lag] = energy > 1e-12 ? dot / Math.sqrt(energy) : 0;
+
+    // Slide the energy window forward one sample.
+    energy -= signal[lag] * signal[lag];
+    const next = lag + m;
+    if (next < signal.length) energy += signal[next] * signal[next];
+  }
+  return scores;
+}
+
+/**
+ * Locate a reference signal inside a recording.
+ *
+ * Two passes: a decimated sweep to find roughly where the chirp is, then a
+ * full-rate search in a small window around it. A single full-rate pass over a
+ * second of 48kHz audio is tens of millions of operations and visibly janks a
+ * phone; decimating by 4 first cuts that by ~16x, and the refinement pass
+ * restores sample accuracy.
+ *
+ * `confidence` is the peak divided by the RMS of everything outside a guard
+ * band around it — literally "how far the match stands above the background".
+ */
+export function detectChirp(
+  recording: Float32Array,
+  reference: Float32Array,
+  options: { maxLagSamples: number; decimation?: number } = { maxLagSamples: 0 }
+): DetectionResult {
+  const decimation = options.decimation ?? 4;
+  const maxLag = Math.min(options.maxLagSamples, recording.length - reference.length);
+  if (maxLag <= 0 || reference.length === 0) {
+    return { sampleIndex: -1, confidence: 0 };
+  }
+
+  // --- Coarse pass ---
+  const coarseSignal = decimate(recording, decimation);
+  const coarseRef = decimate(reference, decimation);
+  const coarseScores = correlate(
+    coarseSignal,
+    coarseRef,
+    Math.ceil(maxLag / decimation)
+  );
+  if (coarseScores.length === 0) return { sampleIndex: -1, confidence: 0 };
+
+  let peakIndex = 0;
+  let peakValue = -Infinity;
+  for (let i = 0; i < coarseScores.length; i++) {
+    if (coarseScores[i] > peakValue) {
+      peakValue = coarseScores[i];
+      peakIndex = i;
+    }
+  }
+
+  // Background: everything outside a guard band around the peak. The guard has
+  // to be wide enough to exclude the correlation's own shoulders, or the peak
+  // ends up compared against itself and every match looks weak.
+  const guard = Math.max(4, Math.round(coarseRef.length / 2));
+  let sumSquares = 0;
+  let count = 0;
+  for (let i = 0; i < coarseScores.length; i++) {
+    if (Math.abs(i - peakIndex) <= guard) continue;
+    sumSquares += coarseScores[i] * coarseScores[i];
+    count++;
+  }
+  const background = count > 0 ? Math.sqrt(sumSquares / count) : 0;
+  const confidence = background > 1e-9 ? peakValue / background : 0;
+
+  // --- Refinement pass ---
+  const centre = peakIndex * decimation;
+  const windowRadius = decimation * 4;
+  const from = Math.max(0, centre - windowRadius);
+  const to = Math.min(maxLag, centre + windowRadius);
+
+  let bestIndex = centre;
+  let bestScore = -Infinity;
+  const refLength = reference.length;
+
+  for (let lag = from; lag <= to; lag++) {
+    let dot = 0;
+    let energy = 0;
+    for (let i = 0; i < refLength; i++) {
+      const sample = recording[lag + i];
+      dot += sample * reference[i];
+      energy += sample * sample;
+    }
+    const score = energy > 1e-12 ? dot / Math.sqrt(energy) : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = lag;
+    }
+  }
+
+  return { sampleIndex: bestIndex, confidence };
+}

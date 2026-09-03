@@ -8,6 +8,7 @@ import {
   type TransportState,
 } from '@tabjam/shared';
 import { speakBeat } from './metronome';
+import type { ClockSync } from './clock';
 
 /**
  * Default soundfont.
@@ -42,6 +43,20 @@ interface UseAlphaTabArgs {
   /** Only the audio-output device makes sound and reports position. */
   isAudioOutput: boolean;
   onPositionReport: (positionMs: number, isPlaying: boolean) => void;
+  /** Server/client clock estimate. transport.updatedAt is on the server clock. */
+  clock: ClockSync;
+  /**
+   * This device's measured speaker latency, from acoustic calibration.
+   * On the audio-output device it shifts reported positions back so the rest of
+   * the room follows the sound people actually hear rather than the sound the
+   * synth believes it has already produced. null when uncalibrated.
+   */
+  outputLatencyMs: number | null;
+  /**
+   * Extra offset for a listening device, from cross-device calibration.
+   * Shifts this device's own cursor only.
+   */
+  listenerOffsetMs?: number | null;
 }
 
 /**
@@ -61,6 +76,9 @@ export function useAlphaTab({
   transport,
   isAudioOutput,
   onPositionReport,
+  clock,
+  outputLatencyMs,
+  listenerOffsetMs,
 }: UseAlphaTabArgs): AlphaTabState & {
   seekTo: (ms: number) => void;
   api: alphaTab.AlphaTabApi | null;
@@ -80,12 +98,14 @@ export function useAlphaTab({
   const isAudioOutputRef = useRef(isAudioOutput);
   const metronomeRef = useRef(settings.metronome);
   const reportRef = useRef(onPositionReport);
+  const outputLatencyRef = useRef(outputLatencyMs);
   const lastReportRef = useRef(0);
   const lastBarRef = useRef(-1);
 
   isAudioOutputRef.current = isAudioOutput;
   metronomeRef.current = settings.metronome;
   reportRef.current = onPositionReport;
+  outputLatencyRef.current = outputLatencyMs;
 
   // --- Instance lifecycle -------------------------------------------------
 
@@ -142,7 +162,11 @@ export function useAlphaTab({
         const now = Date.now();
         if (now - lastReportRef.current >= POSITION_REPORT_INTERVAL_MS) {
           lastReportRef.current = now;
-          reportRef.current(args.currentTime, true);
+          // The synth's position is where sound has been *generated*. What
+          // reaches the room is that much older, by however long the output
+          // path takes — which is exactly what calibration measures.
+          const latency = outputLatencyRef.current ?? 0;
+          reportRef.current(Math.max(0, args.currentTime - latency), true);
         }
       }
     });
@@ -282,17 +306,26 @@ export function useAlphaTab({
     const api = apiRef.current;
     if (!api || !state.ready || isAudioOutput) return;
 
-    const elapsed = transport.isPlaying ? Date.now() - transport.updatedAt : 0;
-    const expected = transport.positionMs + elapsed * (transport.isPlaying ? 1 : 0);
+    // updatedAt is stamped on the server's clock, so the elapsed time has to be
+    // measured on that clock too. Using Date.now() directly here would be wrong
+    // by however far this device's clock differs from the server's, which on
+    // phones is routinely seconds.
+    const elapsed = transport.isPlaying
+      ? clock.serverNow() - transport.updatedAt
+      : 0;
+    const expected =
+      transport.positionMs + Math.max(0, elapsed) + (listenerOffsetMs ?? 0);
 
     if (Math.abs(api.timePosition - expected) > MAX_INTERPOLATION_DRIFT_MS) {
-      api.timePosition = expected;
+      api.timePosition = Math.max(0, expected);
     }
   }, [
     transport.positionMs,
     transport.updatedAt,
     transport.isPlaying,
     isAudioOutput,
+    listenerOffsetMs,
+    clock,
     state.ready,
   ]);
 

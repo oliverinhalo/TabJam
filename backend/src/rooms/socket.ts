@@ -166,6 +166,69 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
       }
     });
 
+    // --- Clock synchronisation -------------------------------------------
+
+    /**
+     * Echo the server clock so the client can estimate the offset between the
+     * two. Deliberately does nothing else: the reply must go out as soon as
+     * possible for the round-trip estimate to mean anything.
+     */
+    socket.on('timeSync', (payload, ack) => {
+      ack?.({
+        clientSentAt: Number(payload?.clientSentAt) || 0,
+        serverTime: Date.now(),
+      });
+    });
+
+    // --- Acoustic calibration --------------------------------------------
+
+    socket.on('calibration', (payload) => {
+      const ctx = contexts.get(socket);
+      if (!ctx) return;
+
+      const raw = payload?.outputLatencyMs;
+      const value = raw === null || raw === undefined ? null : Number(raw);
+      const state = rooms.setCalibration(ctx.roomId, ctx.deviceId, value);
+      if (state) io.to(ctx.roomId).emit('participants', state.participants);
+    });
+
+    /**
+     * Relay a chirp announcement to the rest of the room.
+     *
+     * Only the audio-output device may announce: it is the one whose speaker
+     * everyone else is measuring against, and letting several devices chirp at
+     * once would leave listeners unable to tell the signals apart.
+     */
+    socket.on('announceChirp', (payload) => {
+      const ctx = contexts.get(socket);
+      if (!ctx) return;
+      if (!rooms.isAudioOutput(ctx.roomId, ctx.deviceId)) return;
+      if (!payload?.chirpId || !Number.isFinite(payload.emitAtServerTime)) return;
+
+      socket.to(ctx.roomId).emit('chirpScheduled', {
+        chirpId: String(payload.chirpId),
+        emitAtServerTime: payload.emitAtServerTime,
+        startHz: Number(payload.startHz),
+        endHz: Number(payload.endHz),
+        durationMs: Number(payload.durationMs),
+        fromDeviceId: ctx.deviceId,
+      });
+    });
+
+    /** A listener's measurement, relayed so the room can show what it found. */
+    socket.on('chirpHeard', (payload) => {
+      const ctx = contexts.get(socket);
+      if (!ctx || !payload?.chirpId) return;
+      if (!Number.isFinite(payload.offsetMs)) return;
+
+      io.to(ctx.roomId).emit('chirpResult', {
+        chirpId: String(payload.chirpId),
+        deviceId: ctx.deviceId,
+        offsetMs: payload.offsetMs,
+        confidence: Number(payload.confidence) || 0,
+      });
+    });
+
     socket.on('disconnect', () => {
       const ctx = contexts.get(socket);
       if (!ctx) return;

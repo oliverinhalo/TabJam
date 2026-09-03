@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRoom } from '../lib/useRoom';
 import { useAlphaTab } from '../lib/useAlphaTab';
+import { useCalibration } from '../lib/useCalibration';
 import { stopSpeaking } from '../lib/metronome';
 import { ScoreView } from '../components/ScoreView';
 import { TransportBar } from '../components/TransportBar';
@@ -9,6 +10,7 @@ import { ParticipantList } from '../components/ParticipantList';
 import { SettingsPanel } from '../components/SettingsPanel';
 import { SongLoader } from '../components/SongLoader';
 import { Notices } from '../components/Notices';
+import { CalibrationPanel } from '../components/CalibrationPanel';
 
 interface Props {
   roomId: string;
@@ -24,6 +26,16 @@ export function SessionPage({ roomId }: Props) {
     setContainer(element);
   }, []);
 
+  const calibration = useCalibration({
+    isAudioOutput: room.isAudioOutput,
+    clock: room.clock,
+    clockSynced: room.clockSynced,
+    sendCalibration: room.sendCalibration,
+    announceChirp: room.announceChirp,
+    sendChirpHeard: room.sendChirpHeard,
+    onChirpScheduled: room.onChirpScheduled,
+  });
+
   const engine = useAlphaTab({
     container,
     fileUrl: room.song?.fileUrl ?? null,
@@ -32,6 +44,9 @@ export function SessionPage({ roomId }: Props) {
     transport: room.transport,
     isAudioOutput: room.isAudioOutput,
     onPositionReport: room.reportPosition,
+    clock: room.clock,
+    outputLatencyMs: calibration.result?.outputLatencyMs ?? null,
+    listenerOffsetMs: calibration.listenerOffsetMs,
   });
 
   // A new song invalidates a track selection made against the previous one.
@@ -139,6 +154,12 @@ export function SessionPage({ roomId }: Props) {
             onRename={room.rename}
             onClaimAudio={room.claimAudioOutput}
             onReleaseAudio={room.releaseAudioOutput}
+          />
+
+          <CalibrationPanel
+            calibration={calibration}
+            isAudioOutput={room.isAudioOutput}
+            clockSynced={room.clockSynced}
           />
 
           <SettingsPanel settings={room.settings} onChange={room.updateSettings} />

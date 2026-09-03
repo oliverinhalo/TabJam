@@ -1,6 +1,7 @@
 import {
   DEFAULT_SETTINGS,
   DEFAULT_TRANSPORT,
+  MAX_CALIBRATION_OFFSET_MS,
   type Participant,
   type ResolvedSong,
   type RoomSettings,
@@ -92,6 +93,7 @@ export class RoomStore {
         name: name || 'Player',
         connectedAt: Date.now(),
         online: true,
+        outputLatencyMs: null,
       });
     }
 
@@ -217,6 +219,35 @@ export class RoomStore {
       state.transport = { ...state.transport, isPlaying: false, updatedAt: Date.now() };
     }
     return state.audioOutputDeviceId;
+  }
+
+  /**
+   * Record a device's measured speaker latency.
+   *
+   * Values are clamped and sanity-checked here as well as on the client: a
+   * wild number would drag the whole room's cursor off the music.
+   */
+  setCalibration(
+    roomId: string,
+    deviceId: string,
+    outputLatencyMs: number | null
+  ): RoomState | null {
+    const state = this.get(roomId);
+    if (!state) return null;
+
+    const participant = state.participants.find((p) => p.deviceId === deviceId);
+    if (!participant) return state;
+
+    if (outputLatencyMs === null) {
+      participant.outputLatencyMs = null;
+    } else if (Number.isFinite(outputLatencyMs)) {
+      participant.outputLatencyMs = clamp(
+        outputLatencyMs,
+        0,
+        MAX_CALIBRATION_OFFSET_MS
+      );
+    }
+    return state;
   }
 
   isAudioOutput(roomId: string, deviceId: string): boolean {

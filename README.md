@@ -64,33 +64,87 @@ for free.
 
 ---
 
-## Quick start
+## Install with Docker
+
+Everything runs as one container. You need Docker with the Compose plugin
+(`docker compose version` should print something) — nothing else.
 
 ```bash
 git clone https://github.com/oliverinhalo/TabJam.git
 cd TabJam
-cp .env.example .env      # set APP_PORT if 8080 is taken
+cp .env.example .env
 docker compose up -d --build
 ```
 
-Open `http://localhost:8080`, click **Start a session**, share the link.
+That's it. Open **http://localhost:8080**, click *Start a session*, and share the
+link with the band.
 
-Add songs either way:
+The first build takes a few minutes (it compiles the frontend); later ones are
+cached and quick.
 
-- **Through the UI** — the file picker in the session sidebar, or
-- **On disk** — drop `.gp*` files into `./data/library/` (bind-mounted into the
-  container; they show up without a restart).
+### Check it came up
+
+```bash
+docker compose ps          # should show "healthy"
+curl localhost:8080/api/health
+# {"status":"ok","uptimeSeconds":12,"rooms":0,"participants":0}
+```
+
+The container has a built-in healthcheck, so `healthy` means the server is
+genuinely serving, not just running.
+
+### Add songs
+
+Notation comes from Guitar Pro files you supply — `.gp`, `.gpx`, `.gp5`, `.gp4`
+or `.gp3`. Two ways in, both equivalent:
+
+- **Through the UI** — the file picker in the session sidebar.
+- **On disk** — drop files into `./data/library/` next to the compose file. It's
+  bind-mounted into the container, so they appear without a restart.
+
+Naming them `Artist - Title.gp5` gets you a proper title and artist in the UI.
+
+### Everyday commands
+
+```bash
+docker compose logs -f          # follow logs
+docker compose restart          # restart
+docker compose down             # stop and remove the container
+docker compose up -d --build    # update after a git pull
+```
+
+Your library lives in `./data/library` on the host, so none of these lose songs.
 
 ### Configuration
 
-All of these are optional; `.env.example` has the defaults.
+Everything is optional — the defaults in `.env.example` work as-is.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `APP_PORT` | `8080` | Host port. Container always listens on 8080. |
-| `PUBLIC_ORIGIN` | *(derived)* | Set this behind a reverse proxy so shared links use your public hostname. |
+| `APP_PORT` | `8080` | Host port. Change it if 8080 is taken. The container always listens on 8080 internally. |
+| `PUBLIC_ORIGIN` | *(derived)* | Set behind a reverse proxy so shared session links use your public hostname instead of the container's. |
 | `MAX_UPLOAD_MB` | `25` | Upload size limit. |
-| `LIBRARY_DIR` | `/app/data/library` | Where files live inside the container. |
+
+To run on a different port, edit `.env`:
+
+```bash
+APP_PORT=9090
+```
+
+then `docker compose up -d`.
+
+### Running without Docker
+
+If you'd rather not use Docker:
+
+```bash
+npm ci
+npm run build
+node backend/dist/index.js      # serves on :8080
+```
+
+Node 20 or newer. Set `STATIC_DIR=frontend/dist` if you run it from somewhere
+other than the repo root.
 
 ### Behind a reverse proxy
 
@@ -152,6 +206,88 @@ cursor motion for free and needs the network only for drift correction.
 
 ---
 
+## Sync check (acoustic calibration)
+
+WebSocket sync can't see one thing: how long it takes a sound to actually leave
+the speaker after the browser is told to play it. A phone's built-in speaker is
+near-instant, but a Bluetooth speaker or wireless headphones can add 100–300ms
+that no amount of network timing will reveal. TabJam measures that directly, by
+playing a short chirp and listening for it with the device's own microphone.
+
+This is an **on-demand check, not continuous listening**. A practice room with
+live drums and amps is far too loud to track the song mix in real time. The
+check takes about a second and runs in a quiet moment.
+
+**When it runs**
+
+- Automatically when a device becomes the audio-output device (the tap on
+  *Play audio on this device* is also the user gesture iOS needs).
+- Manually, any time, via **Recalibrate** in the Sync check panel.
+
+**What it measures**
+
+The panel shows two numbers, because they mean different things:
+
+- **Measured round trip** — what was actually observed: speaker → air →
+  microphone. This is a real measurement.
+- **Speaker delay** — the share of that attributable to the output path, which
+  is the part sync actually needs. Chrome and Firefox report
+  `AudioContext.outputLatency` (and it does account for Bluetooth), so that's
+  used when available. Safari doesn't implement it, so there the round trip is
+  split in half on the assumption that the input and output chains are roughly
+  symmetric. That's an assumption, which is exactly why both numbers are shown.
+
+The speaker delay is then subtracted from the positions the audio device
+broadcasts, so everyone else's cursor follows the sound people *hear* rather
+than the sound the synth thinks it has already made.
+
+**Cross-device check**
+
+*Check other devices* makes the audio device emit a chirp and announce it over
+the socket; every other device listens and reports how late it arrived. This is
+coarser than the self-test by construction — without a local reference signal it
+inherits the capture buffer granularity and the listening device's own
+microphone latency — so treat it as a way to catch a badly-delayed speaker, not
+a precision instrument.
+
+**Privacy**
+
+No audio ever leaves the device. Detection runs locally and only a single
+number, in milliseconds, goes over the WebSocket. There's no audio streaming
+anywhere, and no WebRTC.
+
+**Requirements and failure modes**
+
+- **HTTPS is required.** `getUserMedia` needs a secure context, and it's easy to
+  leave a self-hosted app on plain HTTP inside the LAN. Without TLS the panel
+  says so and calibration is unavailable. `localhost` counts as secure, so it
+  works for local testing.
+- **It is purely an enhancement.** Decline the microphone, have no microphone,
+  or run over HTTP, and everything works exactly as it does otherwise, on
+  network-only sync. Nothing depends on a calibration result existing.
+- A measurement is cached for a day, then discarded — it describes whatever was
+  plugged in at the time, and a stale one is a guess about different hardware.
+
+**Why a chirp and not the song**
+
+A 50ms sweep from 1.5–4.5kHz has a sharp autocorrelation peak, so a matched
+filter locks onto it to within a sample. Fingerprinting an arbitrary,
+ever-changing multi-instrument mix in real time is a much harder problem that
+wouldn't survive a real band. The band is 1.5–4.5kHz because that's where small
+phone speakers and microphones actually work; near-ultrasonic chirps are
+tempting for being unobtrusive, but cheap phone hardware rolls off above ~18kHz,
+so they fail on exactly the devices people bring to practice. A higher-frequency
+variant is defined in `dsp.ts` if your own devices handle it.
+
+The detector has tests that plant a chirp at a known offset in synthetic noise:
+
+```bash
+npm test
+```
+
+It recovers the delay to the sample, holds up with the chirp 8dB *below* the
+noise, and refuses to report a detection in noise alone.
+
 ## Architecture
 
 ```
@@ -164,6 +300,9 @@ backend/    Express + Socket.io
   rooms/    In-memory room state + socket handlers
   http/     REST routes
 frontend/   React + Vite + alphaTab
+  lib/dsp.ts          chirp synthesis + matched-filter detection (pure, tested)
+  lib/calibration.ts  microphone capture and the measurement itself
+  lib/clock.ts        NTP-style server/client clock estimation
 ```
 
 **No database.** Room state lives in memory in a single Node process, which is
@@ -200,6 +339,9 @@ home server; don't put this on the public internet and expect privacy.
   scheduling playback at a computed future time. It's a genuinely different
   problem from cursor sync and would complicate the single-device path that
   works well. Deliberately left out.
+- **Continuous acoustic tracking during playback.** Deliberately out of scope:
+  a loud room defeats it, and the on-demand check gets the same number without
+  fighting live drums.
 - **Side-by-side track panes.** Selected tracks currently render stacked
   vertically via alphaTab's native multi-track layout. True split-screen panes
   (one alphaTab instance per track over a shared `Score`, in a responsive grid)

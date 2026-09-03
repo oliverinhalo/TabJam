@@ -1,14 +1,23 @@
+# =============================================================================
+# TabJam production image
+#
+# Stage 1 installs dependencies once, builds all three workspaces, then reduces
+# the dependency tree to what the server actually needs at runtime. Stage 2 just
+# copies the result — it never runs an install of its own, which keeps the two
+# stages from running npm concurrently and roughly halves the build time.
+# =============================================================================
+
 # --- Stage 1: build ---------------------------------------------------------
 FROM node:22-alpine AS build
 
 WORKDIR /app
 
-# Install dependencies against the lockfile first so this layer caches well.
+# Manifests first, so this layer is cached until a dependency actually changes.
 COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/
 COPY backend/package.json ./backend/
 COPY frontend/package.json ./frontend/
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 # Then the sources.
 COPY shared ./shared
@@ -17,6 +26,10 @@ COPY frontend ./frontend
 
 # shared -> backend -> frontend, in that order.
 RUN npm run build
+
+# Drop devDependencies now that everything is compiled. What remains is the
+# tree the runtime stage copies verbatim.
+RUN npm prune --omit=dev --no-audit --no-fund
 
 # --- Stage 2: runtime -------------------------------------------------------
 FROM node:22-alpine AS runtime
@@ -28,16 +41,18 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-# Production dependencies only.
-COPY package.json package-lock.json ./
-COPY shared/package.json ./shared/
-COPY backend/package.json ./backend/
-COPY frontend/package.json ./frontend/
-RUN npm ci --omit=dev && npm cache clean --force
-
-# Compiled output: backend JS, shared types, and the built frontend as static files.
+# npm workspaces link @tabjam/* as symlinks into node_modules, so each workspace
+# directory has to exist for those links to resolve — hence the package.json
+# files alongside the compiled output.
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/shared/package.json ./shared/package.json
 COPY --from=build /app/shared/dist ./shared/dist
+COPY --from=build /app/backend/package.json ./backend/package.json
 COPY --from=build /app/backend/dist ./backend/dist
+COPY --from=build /app/frontend/package.json ./frontend/package.json
+
+# The built frontend is served as static files by the same server.
 COPY --from=build /app/frontend/dist ./public
 
 RUN mkdir -p /app/data/library && chown -R node:node /app/data

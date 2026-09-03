@@ -106,6 +106,11 @@ export interface Participant {
   connectedAt: number;
   /** True while this device has an open socket. */
   online: boolean;
+  /**
+   * Measured speaker output latency in ms, from acoustic calibration.
+   * null when the device has not calibrated (or could not).
+   */
+  outputLatencyMs: number | null;
 }
 
 export interface RoomState {
@@ -119,6 +124,61 @@ export interface RoomState {
   audioOutputDeviceId: string | null;
   participants: Participant[];
 }
+
+// ---------------------------------------------------------------------------
+// Acoustic calibration
+// ---------------------------------------------------------------------------
+
+export type CalibrationStatus =
+  /** Never run on this device. */
+  | 'idle'
+  /** No microphone, or not a secure context, so calibration cannot run. */
+  | 'unsupported'
+  /** The user declined microphone access. */
+  | 'denied'
+  | 'running'
+  | 'ok'
+  /** Ran, but the chirp could not be detected confidently. */
+  | 'failed';
+
+/**
+ * One acoustic measurement.
+ *
+ * `roundTripMs` is what is actually measured: the time from scheduling the
+ * chirp to detecting it in the microphone. That includes the output path, the
+ * air, and the *input* path.
+ *
+ * `outputLatencyMs` is the share attributable to the output path alone, which
+ * is the only part the sync correction cares about — see
+ * frontend/src/lib/calibration.ts for how the two are related.
+ */
+export interface CalibrationResult {
+  roundTripMs: number;
+  outputLatencyMs: number;
+  /** Detector confidence: correlation peak over background. Higher is better. */
+  confidence: number;
+  measuredAt: number;
+}
+
+/**
+ * A cross-device measurement, made by a device listening to the audio-output
+ * device's chirp. Reports how far behind the audio device's sound arrives here.
+ */
+export interface ListenerCalibration {
+  offsetMs: number;
+  confidence: number;
+  measuredAt: number;
+}
+
+/** Detector confidence below this is treated as noise, not a measurement. */
+export const MIN_CALIBRATION_CONFIDENCE = 5;
+
+/**
+ * Corrections outside this range are rejected. Real device latency tops out
+ * around 300ms even over Bluetooth; anything larger means we locked onto the
+ * wrong peak.
+ */
+export const MAX_CALIBRATION_OFFSET_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Socket.io events
@@ -155,6 +215,43 @@ export interface ClientToServerEvents {
   claimAudioOutput: () => void;
   /** Give up the audio-output role, if this device holds it. */
   releaseAudioOutput: () => void;
+
+  /**
+   * Clock synchronisation probe.
+   *
+   * The server echoes its own clock, letting the client estimate the offset
+   * between the two clocks and the round-trip time. Transport interpolation
+   * needs this: `transport.updatedAt` is stamped with the *server* clock, and
+   * device clocks routinely differ from it by seconds.
+   */
+  timeSync: (
+    payload: { clientSentAt: number },
+    ack: (result: { clientSentAt: number; serverTime: number }) => void
+  ) => void;
+
+  /** Report this device's own measured output latency, or null to clear it. */
+  calibration: (payload: { outputLatencyMs: number | null }) => void;
+
+  /**
+   * Audio-output device announcing that it is about to emit a calibration
+   * chirp, so other devices know to listen and what to expect.
+   */
+  announceChirp: (payload: {
+    chirpId: string;
+    /** Server-clock time at which the chirp leaves the speaker. */
+    emitAtServerTime: number;
+    /** Chirp parameters, so listeners build an identical reference signal. */
+    startHz: number;
+    endHz: number;
+    durationMs: number;
+  }) => void;
+
+  /** A listening device reporting what it heard. */
+  chirpHeard: (payload: {
+    chirpId: string;
+    offsetMs: number;
+    confidence: number;
+  }) => void;
 }
 
 /** Events the server sends to clients. */
@@ -168,6 +265,25 @@ export interface ServerToClientEvents {
   audioOutput: (payload: { audioOutputDeviceId: string | null }) => void;
   /** Transient, human-readable notice to surface in the UI. */
   notice: (payload: { level: 'info' | 'warn' | 'error'; message: string }) => void;
+
+  /** Relayed chirp announcement; listeners arm their detector on this. */
+  chirpScheduled: (payload: {
+    chirpId: string;
+    emitAtServerTime: number;
+    startHz: number;
+    endHz: number;
+    durationMs: number;
+    /** Device emitting the chirp, so it can ignore its own announcement. */
+    fromDeviceId: string;
+  }) => void;
+
+  /** A listener's cross-device measurement, relayed for display. */
+  chirpResult: (payload: {
+    chirpId: string;
+    deviceId: string;
+    offsetMs: number;
+    confidence: number;
+  }) => void;
 }
 
 // ---------------------------------------------------------------------------
