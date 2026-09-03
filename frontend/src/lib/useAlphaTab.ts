@@ -10,7 +10,7 @@ import {
   type TrackInfo,
   type TransportState,
 } from '@tabjam/shared';
-import { speakBeat } from './metronome';
+import { speakBeat, speechLeadMs, stopSpeaking } from './metronome';
 import type { ClockSync } from './clock';
 
 /**
@@ -124,6 +124,10 @@ export function useAlphaTab({
   const settingsRef = useRef(settings);
   const viewRef = useRef(view);
   const lastReportRef = useRef(0);
+  // Spoken-count bookkeeping: pending utterance, and the bar length being learnt.
+  const speechTimerRef = useRef<number | null>(null);
+  const beatsPerBarRef = useRef(4);
+  const highestBeatRef = useRef(0);
 
   isAudioOutputRef.current = isAudioOutput;
   metronomeRef.current = settings.metronome;
@@ -239,12 +243,46 @@ export function useAlphaTab({
 
       for (const event of args.events) {
         if (!(event instanceof alphaTab.midi.AlphaTabMetronomeEvent)) continue;
-        const beatNumber = event.metronomeNumerator + 1;
-        speakBeat(beatNumber, event.metronomeNumerator === 0);
+
+        // Work out how many beats are in a bar by watching where the count
+        // resets, so the spoken number wraps with the music instead of at a
+        // hardcoded four.
+        if (event.metronomeNumerator === 0) {
+          if (highestBeatRef.current > 0) beatsPerBarRef.current = highestBeatRef.current + 1;
+          highestBeatRef.current = 0;
+        } else {
+          highestBeatRef.current = Math.max(highestBeatRef.current, event.metronomeNumerator);
+        }
+
+        /**
+         * Say the *next* beat, started early.
+         *
+         * Speaking on the beat cannot be in time: the browser takes a while to
+         * start a voice, so the word always lands after the beat it names. The
+         * event carries this beat's duration, so the next one is a known time
+         * away, and starting the voice a measured lead ahead of it puts the
+         * word on the beat rather than behind it.
+         */
+        const beatMs = event.metronomeDurationInMilliseconds;
+        if (!Number.isFinite(beatMs) || beatMs <= 0) continue;
+
+        const nextIndex = (event.metronomeNumerator + 1) % beatsPerBarRef.current;
+        const delay = Math.max(0, beatMs - speechLeadMs());
+
+        if (speechTimerRef.current !== null) clearTimeout(speechTimerRef.current);
+        speechTimerRef.current = window.setTimeout(() => {
+          speechTimerRef.current = null;
+          // Conditions can change during the wait — stopped, muted, mode changed.
+          if (metronomeRef.current !== 'spoken' || !isAudioOutputRef.current) return;
+          speakBeat(nextIndex + 1, nextIndex === 0);
+        }, delay);
       }
     });
 
     return () => {
+      if (speechTimerRef.current !== null) clearTimeout(speechTimerRef.current);
+      speechTimerRef.current = null;
+      stopSpeaking();
       api.destroy();
       apiRef.current = null;
       setState({
@@ -532,6 +570,9 @@ export function useAlphaTab({
 
     if (!transport.isPlaying && alreadyPlaying) {
       api.pause();
+      if (speechTimerRef.current !== null) clearTimeout(speechTimerRef.current);
+      speechTimerRef.current = null;
+      stopSpeaking();
     }
   }, [
     transport.isPlaying,

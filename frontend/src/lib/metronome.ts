@@ -11,6 +11,26 @@ const SPOKEN = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
 
 let ready = false;
 
+/**
+ * Measured delay between calling speak() and the voice actually starting.
+ *
+ * This is the whole reason spoken counting has to be scheduled ahead rather
+ * than fired on the beat: the browser needs time to start a voice, typically
+ * 50-300ms depending on the engine and whether it has warmed up. Speaking when
+ * the beat arrives guarantees the word lands after it.
+ *
+ * Seeded with a middling guess and refined from the real onstart timings, so it
+ * adapts to whatever the device is actually doing.
+ */
+let leadMs = 150;
+const MIN_LEAD_MS = 40;
+const MAX_LEAD_MS = 400;
+
+/** How far ahead of a beat speech must be started for it to land on time. */
+export function speechLeadMs(): number {
+  return leadMs;
+}
+
 function synth(): SpeechSynthesis | null {
   return typeof window !== 'undefined' && 'speechSynthesis' in window
     ? window.speechSynthesis
@@ -49,6 +69,16 @@ export function speakBeat(beatNumber: number, isDownbeat: boolean): void {
   utterance.rate = 1.6;
   utterance.pitch = isDownbeat ? 1.2 : 1;
   utterance.volume = 1;
+
+  // Learn how long this device takes to start speaking, and steer the lead
+  // towards it. Averaged rather than replaced outright so one slow start does
+  // not throw the count off for the following bars.
+  const requestedAt = performance.now();
+  utterance.onstart = () => {
+    const observed = performance.now() - requestedAt;
+    leadMs = Math.min(MAX_LEAD_MS, Math.max(MIN_LEAD_MS, leadMs * 0.7 + observed * 0.3));
+  };
+
   speech.speak(utterance);
 }
 

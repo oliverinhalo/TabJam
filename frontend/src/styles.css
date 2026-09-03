@@ -394,15 +394,54 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
     width: 100%;
     transform: translateX(100%);
     transition: transform 180ms ease;
-    z-index: 15;
+    z-index: 30;
     border-left: none;
     /* Clear the home indicator on phones with gesture bars. */
     padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
   .sidebar--open { transform: translateX(0); }
 
-  .topbar__center { align-items: flex-start; }
-  .topbar__title { font-size: 14px; }
+  /*
+   * Hide the score outright while the full-screen menu is open.
+   *
+   * alphaTab gives its cursors `will-change: transform`, which promotes them to
+   * their own compositing layer, and a composited layer can paint over content
+   * that sits above it in normal stacking order — so the playing cursor and its
+   * bar highlight showed through the menu. visibility:hidden takes the whole
+   * subtree out of painting, composited layers included, and there is nothing
+   * to see behind a full-screen menu anyway.
+   */
+  .session--menu .session__main { visibility: hidden; }
+
+  /*
+   * The top bar has four things competing for 390px. The title is the only one
+   * worth the space: the artist is already in the menu, and a status word can
+   * be a dot without losing anything.
+   */
+  .topbar { gap: 8px; padding: 0 10px; }
+  .topbar__center { align-items: flex-start; min-width: 0; }
+  .topbar__title {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .topbar__artist { display: none; }
+
+  /* Status collapses to a coloured dot. */
+  .status {
+    font-size: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .status--on { background: var(--ok); }
+  .status--off { background: var(--danger); }
+
+  /* The session code stays reachable but gives up its label. */
+  .topbar__share { display: none; }
 
   /* Bigger touch targets: these get pressed mid-song with one hand. */
   .transport__play { width: 48px; height: 48px; }

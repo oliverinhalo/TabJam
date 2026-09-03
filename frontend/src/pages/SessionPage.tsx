@@ -86,7 +86,7 @@ export function SessionPage({ roomId }: Props) {
   };
 
   return (
-    <div className="session">
+    <div className={`session ${sidebarOpen ? 'session--menu' : ''}`}>
       <header className="topbar">
         <div className="topbar__left">
           <a className="topbar__logo" href="/">TabJam</a>
