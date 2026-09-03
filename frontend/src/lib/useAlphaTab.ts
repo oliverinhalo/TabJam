@@ -57,6 +57,12 @@ interface UseAlphaTabArgs {
    * Shifts this device's own cursor only.
    */
   listenerOffsetMs?: number | null;
+  /**
+   * How long this device waits before starting, so its audio emerges at the
+   * same moment as the slowest device's. Zero on the slowest device itself and
+   * whenever nothing has been calibrated.
+   */
+  compensationMs?: number;
 }
 
 /**
@@ -79,6 +85,7 @@ export function useAlphaTab({
   clock,
   outputLatencyMs,
   listenerOffsetMs,
+  compensationMs = 0,
 }: UseAlphaTabArgs): AlphaTabState & {
   seekTo: (ms: number) => void;
   api: alphaTab.AlphaTabApi | null;
@@ -306,12 +313,45 @@ export function useAlphaTab({
     const api = apiRef.current;
     if (!api || !state.ready) return;
 
-    if (transport.isPlaying && api.playerState !== alphaTab.synth.PlayerState.Playing) {
-      api.play();
-    } else if (!transport.isPlaying && api.playerState === alphaTab.synth.PlayerState.Playing) {
+    const alreadyPlaying = api.playerState === alphaTab.synth.PlayerState.Playing;
+
+    if (transport.isPlaying && !alreadyPlaying) {
+      /**
+       * Hold back a device whose speaker is quicker than the slowest one.
+       *
+       * A device with latency L that starts at t is heard at t + L. Starting it
+       * at t + (reference - L) instead means every device is heard at
+       * t + reference, so several speakers land together rather than as a flam.
+       * Only devices actually producing sound wait; a screen-only device would
+       * just fall behind the music.
+       *
+       * The wait is a timer, so it inherits setTimeout's few milliseconds of
+       * jitter. That is well inside the tolerance for the 100-300ms differences
+       * this exists to correct, but it is not sample-accurate scheduling.
+       */
+      const wait = isAudioOutput ? Math.max(0, compensationMs) : 0;
+      if (wait === 0) {
+        api.play();
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        // The transport may have been stopped again during the wait.
+        if (apiRef.current) apiRef.current.play();
+      }, wait);
+      return () => clearTimeout(timer);
+    }
+
+    if (!transport.isPlaying && alreadyPlaying) {
       api.pause();
     }
-  }, [transport.isPlaying, transport.updatedAt, state.ready]);
+  }, [
+    transport.isPlaying,
+    transport.updatedAt,
+    state.ready,
+    isAudioOutput,
+    compensationMs,
+  ]);
 
   /**
    * Correct drift against the room's position.

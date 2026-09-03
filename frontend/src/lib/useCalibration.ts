@@ -14,7 +14,8 @@ import {
   listenForChirp,
   runSelfCalibration,
 } from './calibration';
-import type { ChirpAnnouncement } from './useRoom';
+import { SCHEDULE_LEAD_MS } from './calibration';
+import type { ChirpAnnouncement, ChirpTurn } from './useRoom';
 import type { ClockSync } from './clock';
 
 /**
@@ -82,9 +83,15 @@ export interface CalibrationApi {
   calibrate: () => Promise<void>;
   clear: () => void;
   runChirpRound: () => Promise<void>;
+  /** Run a mutual round: every device measured in turn, others listening. */
+  runMutualRound: () => void;
+  /** Non-null while a mutual round is running. */
+  activeTurn: ChirpTurn | null;
 }
 
 interface Args {
+  /** This device's own id, to tell its own chirp from everyone else's. */
+  deviceId: string;
   isAudioOutput: boolean;
   clock: ClockSync;
   clockSynced: boolean;
@@ -102,9 +109,12 @@ interface Args {
     confidence: number;
   }) => void;
   onChirpScheduled: (handler: (a: ChirpAnnouncement) => void) => () => void;
+  onChirpTurn: (handler: (t: ChirpTurn) => void) => () => void;
+  startCalibrationRound: () => void;
 }
 
 export function useCalibration({
+  deviceId,
   isAudioOutput,
   clock,
   clockSynced,
@@ -112,6 +122,8 @@ export function useCalibration({
   announceChirp,
   sendChirpHeard,
   onChirpScheduled,
+  onChirpTurn,
+  startCalibrationRound,
 }: Args): CalibrationApi {
   const supported = isCalibrationSupported();
   const unsupportedReason = calibrationUnsupportedReason();
@@ -123,6 +135,7 @@ export function useCalibration({
   const [error, setError] = useState<string | null>(null);
   const [listenerOffsetMs, setListenerOffsetMs] = useState<number | null>(null);
   const [chirpBusy, setChirpBusy] = useState(false);
+  const [activeTurn, setActiveTurn] = useState<ChirpTurn | null>(null);
 
   const runningRef = useRef(false);
   const autoTriedRef = useRef(false);
@@ -246,8 +259,11 @@ export function useCalibration({
     if (!supported) return;
 
     return onChirpScheduled((announcement) => {
-      // The emitting device hears its own chirp trivially; that is Phase 1's job.
-      if (isAudioOutput) return;
+      // Skip only our own emission — measuring that is the self-test's job.
+      // Keying this off "am I an audio device" would have been wrong as soon as
+      // more than one device produces sound: a non-emitting audio device still
+      // needs to listen.
+      if (announcement.fromDeviceId === deviceId) return;
 
       const expectedLocal = clock.toLocal(announcement.emitAtServerTime);
       const window = Math.max(300, expectedLocal - Date.now()) + LISTEN_TAIL_MS;
@@ -279,7 +295,45 @@ export function useCalibration({
           // error state — the device carries on with network-only sync.
         });
     });
-  }, [supported, isAudioOutput, clock, onChirpScheduled, sendChirpHeard]);
+  }, [supported, deviceId, clock, onChirpScheduled, sendChirpHeard]);
+
+  // --- Mutual rounds -----------------------------------------------------
+
+  /**
+   * Take part in a mutual round.
+   *
+   * On its turn a device runs its own loopback measurement and announces the
+   * chirp so everyone else can hear it too. The loopback is what produces the
+   * latency figure: cross-device arrival times alone are underdetermined —
+   * hearing another device tells you its output latency plus the air plus your
+   * own input latency, which is three unknowns in one number. Each device's own
+   * loopback separates its output path cleanly, and the cross-device readings
+   * then serve as a sanity check on the result.
+   */
+  useEffect(() => {
+    if (!supported) return;
+
+    return onChirpTurn((turn) => {
+      setActiveTurn(turn);
+      // The server advances turns on a timer, so clear the badge a little after
+      // this turn's own work should be done.
+      window.setTimeout(() => {
+        setActiveTurn((current) => (current?.turnIndex === turn.turnIndex ? null : current));
+      }, 2800);
+
+      if (turn.deviceId !== deviceId) return;
+
+      // Tell the room when the tone will sound, then measure ourselves with it.
+      announceChirp({
+        chirpId: `${turn.roundId}:${turn.turnIndex}`,
+        emitAtServerTime: clock.toServer(Date.now() + SCHEDULE_LEAD_MS),
+        startHz: DEFAULT_CHIRP.startHz,
+        endHz: DEFAULT_CHIRP.endHz,
+        durationMs: DEFAULT_CHIRP.durationMs,
+      });
+      void calibrate();
+    });
+  }, [supported, deviceId, clock, onChirpTurn, announceChirp, calibrate]);
 
   return {
     supported,
@@ -292,5 +346,7 @@ export function useCalibration({
     calibrate,
     clear,
     runChirpRound,
+    runMutualRound: startCalibrationRound,
+    activeTurn,
   };
 }

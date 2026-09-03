@@ -273,14 +273,43 @@ The speaker delay is then subtracted from the positions the audio device
 broadcasts, so everyone else's cursor follows the sound people *hear* rather
 than the sound the synth thinks it has already made.
 
-**Cross-device check**
+**Aligning the room: everyone waits for the slowest**
 
-*Check other devices* makes the audio device emit a chirp and announce it over
-the socket; every other device listens and reports how late it arrived. This is
-coarser than the self-test by construction — without a local reference signal it
-inherits the capture buffer granularity and the listening device's own
-microphone latency — so treat it as a way to catch a badly-delayed speaker, not
-a precision instrument.
+Devices differ. A phone speaker is near-instant; a Bluetooth speaker might be
+250ms behind. Left alone they play as a flam and no single cursor position is
+right for everyone.
+
+So the room runs at the pace of its **slowest** device:
+
+1. Each device measures its own speaker delay.
+2. The server takes the largest of those — the *room pace* — counting only
+   devices actually producing sound. A silent phone paired to slow headphones
+   says nothing about when the room hears a note, so it sets no pace.
+3. Every other device waits `pace − its own delay` before starting.
+
+A device measured at 30ms in a room paced at 210ms waits 180ms; the 210ms device
+waits nothing. All of them are then heard at the same moment, and the cursor
+sits on the bar people are actually hearing. The participant list shows each
+device's measured delay and marks the one setting the pace.
+
+This is also what makes **several devices play at once** workable — two people
+each monitoring through their own amp. Turn it on per device with *Also play
+audio here*.
+
+Nothing is calibrated? Then the pace is 0, every compensation is 0, and the app
+behaves exactly as it did before any of this existed.
+
+**Mutual round**
+
+*Sync all devices* runs a round where every device plays a tone in turn while
+the others listen. Turns are sequential on purpose: two chirps overlapping in
+the air are indistinguishable to a matched filter looking for one waveform.
+
+Each device's own loopback is what produces its latency figure. Cross-device
+arrival times alone can't: hearing another device tells you its output delay
+plus the air plus your own *input* delay — three unknowns in one number. The
+loopback separates the output path cleanly, and the cross-device readings act
+as a sanity check on it.
 
 **Privacy**
 
@@ -381,12 +410,10 @@ home server; don't put this on the public internet and expect privacy.
 
 ## Not built (and why)
 
-- **Multiple simultaneous audio devices.** Two people monitoring through their
-  own amps needs real synchronized audio start across independent Web Audio
-  contexts on separate machines — NTP-style clock offset estimation, then
-  scheduling playback at a computed future time. It's a genuinely different
-  problem from cursor sync and would complicate the single-device path that
-  works well. Deliberately left out.
+- **Sample-accurate multi-device audio.** Several devices can play together and
+  are aligned to the slowest, but the wait is a timer, so it carries a few
+  milliseconds of scheduling jitter. That is well inside the tolerance for the
+  100-300ms differences it exists to correct, and far from sample-accurate.
 - **Continuous acoustic tracking during playback.** Deliberately out of scope:
   a loud room defeats it, and the on-demand check gets the same number without
   fighting live drums.

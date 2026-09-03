@@ -19,8 +19,11 @@ import { DEFAULT_CHIRP, type ChirpSpec, detectChirp, generateChirp } from './dsp
 
 /** How long to listen after the chirp is scheduled. */
 const LISTEN_WINDOW_MS = 900;
-/** Lead time before emitting, so the graph and recorder are both settled. */
-const SCHEDULE_LEAD_MS = 250;
+/**
+ * Lead time before emitting, so the graph and recorder are both settled.
+ * Exported so a mutual round can announce the emission time accurately.
+ */
+export const SCHEDULE_LEAD_MS = 250;
 /** Chirp playback gain. Audible but brief — a blip, not a screech. */
 const CHIRP_GAIN = 0.35;
 

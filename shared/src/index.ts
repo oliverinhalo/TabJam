@@ -120,8 +120,21 @@ export interface RoomState {
   history: ResolvedSong[];
   transport: TransportState;
   settings: RoomSettings;
-  /** deviceId of the device producing sound, or null if nobody claimed it. */
-  audioOutputDeviceId: string | null;
+  /**
+   * Devices currently producing sound. More than one is allowed: with
+   * calibration in place their outputs are delayed to emerge together.
+   */
+  audioOutputDeviceIds: string[];
+  /**
+   * The slowest measured speaker latency among the audio-output devices, in ms.
+   *
+   * This is the pace the room runs at. Every device delays itself by
+   * (referenceLatencyMs - its own latency) so all audio emerges at the same
+   * moment and every cursor sits on the bar people are actually hearing.
+   * Zero when nothing has been calibrated, which makes all compensation zero
+   * and leaves behaviour exactly as it was before calibration.
+   */
+  referenceLatencyMs: number;
   participants: Participant[];
 }
 
@@ -211,9 +224,9 @@ export interface ClientToServerEvents {
 
   updateSettings: (payload: Partial<RoomSettings>) => void;
 
-  /** Claim the audio-output role for this device. */
+  /** Start producing sound on this device, alongside any others already doing so. */
   claimAudioOutput: () => void;
-  /** Give up the audio-output role, if this device holds it. */
+  /** Stop producing sound on this device. */
   releaseAudioOutput: () => void;
 
   /**
@@ -252,6 +265,12 @@ export interface ClientToServerEvents {
     offsetMs: number;
     confidence: number;
   }) => void;
+
+  /**
+   * Ask the server to run a mutual calibration round: every participant emits a
+   * chirp in turn while the others listen.
+   */
+  startCalibrationRound: () => void;
 }
 
 /** Events the server sends to clients. */
@@ -262,7 +281,10 @@ export interface ServerToClientEvents {
   settings: (settings: RoomSettings) => void;
   participants: (participants: Participant[]) => void;
   song: (payload: { song: ResolvedSong | null; history: ResolvedSong[] }) => void;
-  audioOutput: (payload: { audioOutputDeviceId: string | null }) => void;
+  audioOutput: (payload: {
+    audioOutputDeviceIds: string[];
+    referenceLatencyMs: number;
+  }) => void;
   /** Transient, human-readable notice to surface in the UI. */
   notice: (payload: { level: 'info' | 'warn' | 'error'; message: string }) => void;
 
@@ -283,6 +305,27 @@ export interface ServerToClientEvents {
     deviceId: string;
     offsetMs: number;
     confidence: number;
+  }) => void;
+
+  /**
+   * Whose turn it is to emit during a mutual calibration round.
+   *
+   * Devices take turns rather than chirping together: two chirps overlapping in
+   * the air are indistinguishable to a matched filter looking for one waveform.
+   */
+  chirpTurn: (payload: {
+    roundId: string;
+    /** The device that should emit now. Everyone else listens. */
+    deviceId: string;
+    turnIndex: number;
+    totalTurns: number;
+  }) => void;
+
+  /** A mutual round finished; carries the resulting per-device latencies. */
+  calibrationRound: (payload: {
+    roundId: string;
+    latencies: { deviceId: string; outputLatencyMs: number | null }[];
+    referenceLatencyMs: number;
   }) => void;
 }
 

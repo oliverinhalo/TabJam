@@ -17,6 +17,24 @@ interface SocketContext {
 
 const contexts = new WeakMap<TabJamSocket, SocketContext>();
 
+/**
+ * Mutual calibration rounds in progress, keyed by room.
+ *
+ * Devices take turns emitting because two chirps overlapping in the air are
+ * indistinguishable to a matched filter looking for one known waveform. The
+ * server only sequences the turns; the measuring is entirely client-side.
+ */
+interface ActiveRound {
+  roundId: string;
+  /** Device whose turn it is to emit right now. */
+  deviceId: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+const rounds = new Map<string, ActiveRound>();
+
+/** Long enough for a device to arm its microphone, emit, listen and detect. */
+const TURN_DURATION_MS = 3000;
+
 export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void {
   io.on('connection', (socket) => {
     socket.on('join', (payload, ack) => {
@@ -39,7 +57,8 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
       // reassignment that came with it.
       socket.to(roomId).emit('participants', state.participants);
       io.to(roomId).emit('audioOutput', {
-        audioOutputDeviceId: state.audioOutputDeviceId,
+        audioOutputDeviceIds: state.audioOutputDeviceIds,
+        referenceLatencyMs: state.referenceLatencyMs,
       });
     });
 
@@ -141,12 +160,18 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
     socket.on('claimAudioOutput', () => {
       const ctx = contexts.get(socket);
       if (!ctx) return;
-      const holder = rooms.claimAudioOutput(ctx.roomId, ctx.deviceId);
-      io.to(ctx.roomId).emit('audioOutput', { audioOutputDeviceId: holder });
+      rooms.claimAudioOutput(ctx.roomId, ctx.deviceId);
 
       const state = rooms.get(ctx.roomId);
+      if (!state) return;
+
+      io.to(ctx.roomId).emit('audioOutput', {
+        audioOutputDeviceIds: state.audioOutputDeviceIds,
+        referenceLatencyMs: state.referenceLatencyMs,
+      });
+
       const name =
-        state?.participants.find((p) => p.deviceId === holder)?.name ?? 'Someone';
+        state.participants.find((p) => p.deviceId === ctx.deviceId)?.name ?? 'Someone';
       io.to(ctx.roomId).emit('notice', {
         level: 'info',
         message: `${name} is now playing audio.`,
@@ -156,9 +181,15 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
     socket.on('releaseAudioOutput', () => {
       const ctx = contexts.get(socket);
       if (!ctx) return;
-      const holder = rooms.releaseAudioOutput(ctx.roomId, ctx.deviceId);
-      io.to(ctx.roomId).emit('audioOutput', { audioOutputDeviceId: holder });
-      if (holder === null) {
+      const holders = rooms.releaseAudioOutput(ctx.roomId, ctx.deviceId);
+      const state = rooms.get(ctx.roomId);
+      if (!state) return;
+
+      io.to(ctx.roomId).emit('audioOutput', {
+        audioOutputDeviceIds: state.audioOutputDeviceIds,
+        referenceLatencyMs: state.referenceLatencyMs,
+      });
+      if (holders && holders.length === 0) {
         io.to(ctx.roomId).emit('notice', {
           level: 'warn',
           message: 'No device is producing audio. Claim it to hear playback.',
@@ -182,6 +213,69 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
 
     // --- Acoustic calibration --------------------------------------------
 
+    /**
+     * Run a mutual round: every online participant emits in turn while the rest
+     * listen, so each device is measured against the others rather than only
+     * against itself.
+     */
+    socket.on('startCalibrationRound', () => {
+      const ctx = contexts.get(socket);
+      if (!ctx) return;
+
+      const state = rooms.get(ctx.roomId);
+      if (!state) return;
+
+      // A round already running would have its turns interleaved by a second
+      // one, making every measurement meaningless.
+      if (rounds.has(ctx.roomId)) return;
+
+      const participants = state.participants.filter((p) => p.online);
+      if (participants.length < 2) {
+        socket.emit('notice', {
+          level: 'warn',
+          message: 'A mutual check needs at least two devices in the room.',
+        });
+        return;
+      }
+
+      const roundId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const order = participants.map((p) => p.deviceId);
+
+      const runTurn = (turnIndex: number) => {
+        if (turnIndex >= order.length) {
+          rounds.delete(ctx.roomId);
+          const finished = rooms.refreshReference(ctx.roomId);
+          if (!finished) return;
+
+          io.to(ctx.roomId).emit('calibrationRound', {
+            roundId,
+            latencies: finished.participants.map((p) => ({
+              deviceId: p.deviceId,
+              outputLatencyMs: p.outputLatencyMs,
+            })),
+            referenceLatencyMs: finished.referenceLatencyMs,
+          });
+          return;
+        }
+
+        const deviceId = order[turnIndex];
+        rounds.set(ctx.roomId, {
+          roundId,
+          deviceId,
+          timer: setTimeout(() => runTurn(turnIndex + 1), TURN_DURATION_MS),
+        });
+
+        io.to(ctx.roomId).emit('chirpTurn', {
+          roundId,
+          deviceId,
+          turnIndex,
+          totalTurns: order.length,
+        });
+      };
+
+      runTurn(0);
+    });
+
     socket.on('calibration', (payload) => {
       const ctx = contexts.get(socket);
       if (!ctx) return;
@@ -189,7 +283,15 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
       const raw = payload?.outputLatencyMs;
       const value = raw === null || raw === undefined ? null : Number(raw);
       const state = rooms.setCalibration(ctx.roomId, ctx.deviceId, value);
-      if (state) io.to(ctx.roomId).emit('participants', state.participants);
+      if (!state) return;
+
+      io.to(ctx.roomId).emit('participants', state.participants);
+      // A new measurement may have changed which device is slowest, and every
+      // device's compensation is derived from that.
+      io.to(ctx.roomId).emit('audioOutput', {
+        audioOutputDeviceIds: state.audioOutputDeviceIds,
+        referenceLatencyMs: state.referenceLatencyMs,
+      });
     });
 
     /**
@@ -202,7 +304,11 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
     socket.on('announceChirp', (payload) => {
       const ctx = contexts.get(socket);
       if (!ctx) return;
-      if (!rooms.isAudioOutput(ctx.roomId, ctx.deviceId)) return;
+      // Outside a round only an audio source may chirp; during one, the device
+      // whose turn it is may, whether or not it is producing sound.
+      const round = rounds.get(ctx.roomId);
+      const isTurn = round?.deviceId === ctx.deviceId;
+      if (!isTurn && !rooms.isAudioOutput(ctx.roomId, ctx.deviceId)) return;
       if (!payload?.chirpId || !Number.isFinite(payload.emitAtServerTime)) return;
 
       socket.to(ctx.roomId).emit('chirpScheduled', {
@@ -238,7 +344,8 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
 
       io.to(ctx.roomId).emit('participants', state.participants);
       io.to(ctx.roomId).emit('audioOutput', {
-        audioOutputDeviceId: state.audioOutputDeviceId,
+        audioOutputDeviceIds: state.audioOutputDeviceIds,
+        referenceLatencyMs: state.referenceLatencyMs,
       });
       if (!state.transport.isPlaying) {
         io.to(ctx.roomId).emit('transport', state.transport);

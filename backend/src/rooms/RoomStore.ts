@@ -50,7 +50,8 @@ export class RoomStore {
       history: [],
       transport: { ...DEFAULT_TRANSPORT, updatedAt: Date.now() },
       settings: { ...DEFAULT_SETTINGS },
-      audioOutputDeviceId: null,
+      audioOutputDeviceIds: [],
+      referenceLatencyMs: 0,
       participants: [],
     };
     this.rooms.set(roomId, { state, sockets: new Map(), emptiedAt: null });
@@ -97,9 +98,10 @@ export class RoomStore {
       });
     }
 
-    if (state.audioOutputDeviceId === null) {
-      state.audioOutputDeviceId = deviceId;
+    if (state.audioOutputDeviceIds.length === 0) {
+      state.audioOutputDeviceIds = [deviceId];
     }
+    this.recomputeReference(state);
 
     return state;
   }
@@ -120,18 +122,27 @@ export class RoomStore {
       const participant = room.state.participants.find((p) => p.deviceId === deviceId);
       if (participant) participant.online = false;
 
-      // Hand the audio role to someone still present, if anyone is.
-      if (room.state.audioOutputDeviceId === deviceId) {
-        const next = room.state.participants.find((p) => p.online);
-        room.state.audioOutputDeviceId = next?.deviceId ?? null;
-        // Nobody can make sound, so stop the transport rather than let it drift.
-        if (!next) {
-          room.state.transport = {
-            ...room.state.transport,
-            isPlaying: false,
-            updatedAt: Date.now(),
-          };
+      // A departing device stops being an audio source.
+      if (room.state.audioOutputDeviceIds.includes(deviceId)) {
+        room.state.audioOutputDeviceIds = room.state.audioOutputDeviceIds.filter(
+          (id) => id !== deviceId
+        );
+
+        // Keep the room audible by promoting someone still present.
+        if (room.state.audioOutputDeviceIds.length === 0) {
+          const next = room.state.participants.find((p) => p.online);
+          if (next) {
+            room.state.audioOutputDeviceIds = [next.deviceId];
+          } else {
+            // Nobody can make sound, so stop rather than let the transport drift.
+            room.state.transport = {
+              ...room.state.transport,
+              isPlaying: false,
+              updatedAt: Date.now(),
+            };
+          }
         }
+        this.recomputeReference(room.state);
       }
     }
 
@@ -199,26 +210,42 @@ export class RoomStore {
    * need: the second claim simply supersedes the first and everyone is told the
    * same answer via the broadcast that follows.
    */
-  claimAudioOutput(roomId: string, deviceId: string): string | null {
+  /**
+   * Add a device to the set producing sound.
+   *
+   * Several devices may produce sound at once. Keeping them in step is what the
+   * latency compensation is for: each delays itself to the slowest, so their
+   * outputs emerge together rather than as a flam.
+   */
+  claimAudioOutput(roomId: string, deviceId: string): string[] | null {
     const state = this.get(roomId);
     if (!state) return null;
+
     const known = state.participants.some((p) => p.deviceId === deviceId && p.online);
-    if (!known) return state.audioOutputDeviceId;
-    state.audioOutputDeviceId = deviceId;
-    return deviceId;
+    if (known && !state.audioOutputDeviceIds.includes(deviceId)) {
+      state.audioOutputDeviceIds = [...state.audioOutputDeviceIds, deviceId];
+      this.recomputeReference(state);
+    }
+    return state.audioOutputDeviceIds;
   }
 
-  releaseAudioOutput(roomId: string, deviceId: string): string | null {
+  releaseAudioOutput(roomId: string, deviceId: string): string[] | null {
     const state = this.get(roomId);
     if (!state) return null;
-    if (state.audioOutputDeviceId !== deviceId) return state.audioOutputDeviceId;
+    if (!state.audioOutputDeviceIds.includes(deviceId)) {
+      return state.audioOutputDeviceIds;
+    }
 
-    const next = state.participants.find((p) => p.online && p.deviceId !== deviceId);
-    state.audioOutputDeviceId = next?.deviceId ?? null;
-    if (!next) {
+    state.audioOutputDeviceIds = state.audioOutputDeviceIds.filter(
+      (id) => id !== deviceId
+    );
+    // Leaving a room with nothing making sound would let the transport run on
+    // silently, so stop it instead.
+    if (state.audioOutputDeviceIds.length === 0) {
       state.transport = { ...state.transport, isPlaying: false, updatedAt: Date.now() };
     }
-    return state.audioOutputDeviceId;
+    this.recomputeReference(state);
+    return state.audioOutputDeviceIds;
   }
 
   /**
@@ -247,11 +274,40 @@ export class RoomStore {
         MAX_CALIBRATION_OFFSET_MS
       );
     }
+    // A fresh measurement can change which device is the slowest.
+    this.recomputeReference(state);
     return state;
   }
 
   isAudioOutput(roomId: string, deviceId: string): boolean {
-    return this.get(roomId)?.audioOutputDeviceId === deviceId;
+    return this.get(roomId)?.audioOutputDeviceIds.includes(deviceId) ?? false;
+  }
+
+  /**
+   * Recompute the room's reference latency: the slowest speaker among the
+   * devices actually producing sound.
+   *
+   * Only audio sources count. A silent phone's Bluetooth headphones say nothing
+   * about when the room hears a note, and letting one set the pace would delay
+   * everybody for no reason.
+   *
+   * Uncalibrated devices contribute nothing rather than a guess, so a room
+   * where nobody has calibrated keeps a reference of 0 and behaves exactly as
+   * it did before any of this existed.
+   */
+  private recomputeReference(state: RoomState): void {
+    const latencies = state.audioOutputDeviceIds
+      .map((id) => state.participants.find((p) => p.deviceId === id)?.outputLatencyMs)
+      .filter((value): value is number => typeof value === 'number');
+
+    state.referenceLatencyMs = latencies.length > 0 ? Math.max(...latencies) : 0;
+  }
+
+  /** Public wrapper, for callers that changed a latency out of band. */
+  refreshReference(roomId: string): RoomState | null {
+    const state = this.get(roomId);
+    if (state) this.recomputeReference(state);
+    return state;
   }
 
   stats(): { rooms: number; participants: number } {

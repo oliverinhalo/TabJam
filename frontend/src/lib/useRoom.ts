@@ -42,8 +42,18 @@ export interface RoomApi {
   transport: TransportState;
   settings: RoomSettings;
   participants: Participant[];
-  audioOutputDeviceId: string | null;
+  /** Every device currently producing sound. */
+  audioOutputDeviceIds: string[];
   isAudioOutput: boolean;
+  /** Slowest speaker among the audio sources; the pace the room runs at. */
+  referenceLatencyMs: number;
+  /** This device's own measured latency, as the room knows it. */
+  ownLatencyMs: number | null;
+  /**
+   * How long this device must wait so it lines up with the slowest one.
+   * Zero when nothing is calibrated, which is the pre-calibration behaviour.
+   */
+  compensationMs: number;
   notices: Notice[];
   dismissNotice: (id: number) => void;
 
@@ -69,8 +79,28 @@ export interface RoomApi {
     offsetMs: number;
     confidence: number;
   }) => void;
-  /** Subscribe to chirp announcements from the audio-output device. */
+  /** Subscribe to chirp announcements from whichever device is emitting. */
   onChirpScheduled: (handler: (announcement: ChirpAnnouncement) => void) => () => void;
+
+  /** Ask the server to run a mutual round across every device in the room. */
+  startCalibrationRound: () => void;
+  /** Subscribe to "it is device X's turn to emit" during a mutual round. */
+  onChirpTurn: (handler: (turn: ChirpTurn) => void) => () => void;
+  /** Result of the most recently completed mutual round. */
+  lastRound: CalibrationRoundResult | null;
+}
+
+export interface ChirpTurn {
+  roundId: string;
+  deviceId: string;
+  turnIndex: number;
+  totalTurns: number;
+}
+
+export interface CalibrationRoundResult {
+  roundId: string;
+  latencies: { deviceId: string; outputLatencyMs: number | null }[];
+  referenceLatencyMs: number;
 }
 
 /**
@@ -94,7 +124,8 @@ export function useRoom(roomId: string): RoomApi {
   const [transport, setTransport] = useState<TransportState>(DEFAULT_TRANSPORT);
   const [settings, setSettings] = useState<RoomSettings>(DEFAULT_SETTINGS);
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [audioOutputDeviceId, setAudioOutputDeviceId] = useState<string | null>(null);
+  const [audioOutputDeviceIds, setAudioOutputDeviceIds] = useState<string[]>([]);
+  const [referenceLatencyMs, setReferenceLatencyMs] = useState(0);
   const [notices, setNotices] = useState<Notice[]>([]);
 
   // A song chosen while the socket is down would otherwise be emitted into
@@ -108,6 +139,8 @@ export function useRoom(roomId: string): RoomApi {
   // they are one-shot events with a hard deadline, and a re-render would be a
   // needless detour on the way to arming the microphone.
   const chirpHandlers = useRef(new Set<(a: ChirpAnnouncement) => void>());
+  const turnHandlers = useRef(new Set<(t: ChirpTurn) => void>());
+  const [lastRound, setLastRound] = useState<CalibrationRoundResult | null>(null);
 
   const pushNotice = useCallback((level: Notice['level'], message: string) => {
     const notice: Notice = { id: Date.now() + Math.random(), level, message };
@@ -124,7 +157,8 @@ export function useRoom(roomId: string): RoomApi {
     setTransport(state.transport);
     setSettings(state.settings);
     setParticipants(state.participants);
-    setAudioOutputDeviceId(state.audioOutputDeviceId);
+    setAudioOutputDeviceIds(state.audioOutputDeviceIds);
+    setReferenceLatencyMs(state.referenceLatencyMs);
   }, []);
 
   useEffect(() => {
@@ -200,12 +234,20 @@ export function useRoom(roomId: string): RoomApi {
       setSong(next);
       setHistory(nextHistory);
     });
-    socket.on('audioOutput', ({ audioOutputDeviceId: next }) => {
-      setAudioOutputDeviceId(next);
+    socket.on('audioOutput', ({ audioOutputDeviceIds: next, referenceLatencyMs: ref }) => {
+      setAudioOutputDeviceIds(next);
+      setReferenceLatencyMs(ref);
     });
     socket.on('notice', ({ level, message }) => pushNotice(level, message));
     socket.on('chirpScheduled', (announcement) => {
       for (const handler of chirpHandlers.current) handler(announcement);
+    });
+    socket.on('chirpTurn', (turn) => {
+      for (const handler of turnHandlers.current) handler(turn);
+    });
+    socket.on('calibrationRound', (result) => {
+      setLastRound(result);
+      setReferenceLatencyMs(result.referenceLatencyMs);
     });
 
     return () => {
@@ -226,7 +268,13 @@ export function useRoom(roomId: string): RoomApi {
     []
   );
 
-  const isAudioOutput = audioOutputDeviceId === deviceId;
+  const isAudioOutput = audioOutputDeviceIds.includes(deviceId);
+  const ownLatencyMs =
+    participants.find((p) => p.deviceId === deviceId)?.outputLatencyMs ?? null;
+  // Waiting for the slowest device is what makes everything line up. A device
+  // that has not measured itself waits zero rather than a guessed amount.
+  const compensationMs =
+    ownLatencyMs === null ? 0 : Math.max(0, referenceLatencyMs - ownLatencyMs);
 
   return {
     connected,
@@ -239,8 +287,11 @@ export function useRoom(roomId: string): RoomApi {
     transport,
     settings,
     participants,
-    audioOutputDeviceId,
+    audioOutputDeviceIds,
     isAudioOutput,
+    referenceLatencyMs,
+    ownLatencyMs,
+    compensationMs,
     notices,
     dismissNotice: (id) => setNotices((current) => current.filter((n) => n.id !== id)),
 
@@ -281,5 +332,12 @@ export function useRoom(roomId: string): RoomApi {
       chirpHandlers.current.add(handler);
       return () => chirpHandlers.current.delete(handler);
     },
+
+    startCalibrationRound: () => emit('startCalibrationRound'),
+    onChirpTurn: (handler) => {
+      turnHandlers.current.add(handler);
+      return () => turnHandlers.current.delete(handler);
+    },
+    lastRound,
   };
 }

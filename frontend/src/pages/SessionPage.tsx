@@ -27,6 +27,7 @@ export function SessionPage({ roomId }: Props) {
   }, []);
 
   const calibration = useCalibration({
+    deviceId: room.deviceId,
     isAudioOutput: room.isAudioOutput,
     clock: room.clock,
     clockSynced: room.clockSynced,
@@ -34,6 +35,8 @@ export function SessionPage({ roomId }: Props) {
     announceChirp: room.announceChirp,
     sendChirpHeard: room.sendChirpHeard,
     onChirpScheduled: room.onChirpScheduled,
+    onChirpTurn: room.onChirpTurn,
+    startCalibrationRound: room.startCalibrationRound,
   });
 
   const engine = useAlphaTab({
@@ -47,6 +50,7 @@ export function SessionPage({ roomId }: Props) {
     clock: room.clock,
     outputLatencyMs: calibration.result?.outputLatencyMs ?? null,
     listenerOffsetMs: calibration.listenerOffsetMs,
+    compensationMs: room.compensationMs,
   });
 
   // A new song invalidates a track selection made against the previous one.
@@ -149,7 +153,9 @@ export function SessionPage({ roomId }: Props) {
           <ParticipantList
             participants={room.participants}
             deviceId={room.deviceId}
-            audioOutputDeviceId={room.audioOutputDeviceId}
+            audioOutputDeviceIds={room.audioOutputDeviceIds}
+            referenceLatencyMs={room.referenceLatencyMs}
+            compensationMs={room.compensationMs}
             name={room.name}
             onRename={room.rename}
             onClaimAudio={room.claimAudioOutput}
@@ -160,6 +166,9 @@ export function SessionPage({ roomId }: Props) {
             calibration={calibration}
             isAudioOutput={room.isAudioOutput}
             clockSynced={room.clockSynced}
+            referenceLatencyMs={room.referenceLatencyMs}
+            compensationMs={room.compensationMs}
+            participantCount={room.participants.filter((p) => p.online).length}
           />
 
           <SettingsPanel settings={room.settings} onChange={room.updateSettings} />

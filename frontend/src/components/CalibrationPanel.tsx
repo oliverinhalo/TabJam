@@ -4,6 +4,11 @@ interface Props {
   calibration: CalibrationApi;
   isAudioOutput: boolean;
   clockSynced: boolean;
+  /** Slowest speaker in the room; the pace everyone aligns to. */
+  referenceLatencyMs: number;
+  /** How long this device waits to match that pace. */
+  compensationMs: number;
+  participantCount: number;
 }
 
 /**
@@ -13,7 +18,14 @@ interface Props {
  * optional: when the microphone is unavailable the panel explains why and the
  * app keeps working on network-only sync.
  */
-export function CalibrationPanel({ calibration, isAudioOutput, clockSynced }: Props) {
+export function CalibrationPanel({
+  calibration,
+  isAudioOutput,
+  clockSynced,
+  referenceLatencyMs,
+  compensationMs,
+  participantCount,
+}: Props) {
   const { status, result, error, supported, unsupportedReason } = calibration;
 
   return (
@@ -26,7 +38,8 @@ export function CalibrationPanel({ calibration, isAudioOutput, clockSynced }: Pr
       <p className="panel__hint">
         Measures the real delay from your speaker using this device&rsquo;s
         microphone — the part network timing can&rsquo;t see. Bluetooth speakers
-        and headphones can add 100&ndash;300ms.
+        and headphones can add 100&ndash;300ms. The room then runs at the pace of
+        its slowest device, and every quicker one waits to match.
       </p>
 
       {!supported && (
@@ -57,10 +70,30 @@ export function CalibrationPanel({ calibration, isAudioOutput, clockSynced }: Pr
         </dl>
       )}
 
+      {referenceLatencyMs > 0 && (
+        <dl className="metrics">
+          <div>
+            <dt>Room pace (slowest)</dt>
+            <dd>{Math.round(referenceLatencyMs)} ms</dd>
+          </div>
+          <div>
+            <dt>This device waits</dt>
+            <dd>{Math.round(compensationMs)} ms</dd>
+          </div>
+        </dl>
+      )}
+
       {calibration.listenerOffsetMs !== null && (
         <p className="panel__hint">
           Heard the room&rsquo;s audio {Math.round(calibration.listenerOffsetMs)}ms
           after it was sent.
+        </p>
+      )}
+
+      {calibration.activeTurn && (
+        <p className="panel__hint panel__hint--warn">
+          Mutual check: device {calibration.activeTurn.turnIndex + 1} of{' '}
+          {calibration.activeTurn.totalTurns} is playing its tone. Keep quiet.
         </p>
       )}
 
@@ -88,22 +121,34 @@ export function CalibrationPanel({ calibration, isAudioOutput, clockSynced }: Pr
       )}
 
       {/*
-        Cross-device check only makes sense from the device making the sound,
-        and it needs a clock estimate before the timings mean anything.
+        The mutual round measures every device in turn, so it needs more than
+        one device present and a clock estimate for the timings to mean anything.
       */}
+      {supported && participantCount > 1 && (
+        <button
+          type="button"
+          className="button button--ghost"
+          disabled={calibration.activeTurn !== null || !clockSynced}
+          onClick={calibration.runMutualRound}
+          title={
+            clockSynced
+              ? 'Every device plays a tone in turn while the others listen'
+              : 'Waiting for clock sync'
+          }
+        >
+          {calibration.activeTurn ? 'Round in progress…' : 'Sync all devices'}
+        </button>
+      )}
+
       {supported && isAudioOutput && (
         <button
           type="button"
           className="button button--ghost"
           disabled={calibration.chirpBusy || !clockSynced}
           onClick={() => void calibration.runChirpRound()}
-          title={
-            clockSynced
-              ? 'Play a tone for the other devices to measure against'
-              : 'Waiting for clock sync'
-          }
+          title="Play one tone for the other devices to measure against"
         >
-          {calibration.chirpBusy ? 'Playing tone…' : 'Check other devices'}
+          {calibration.chirpBusy ? 'Playing tone…' : 'Play a test tone'}
         </button>
       )}
     </section>

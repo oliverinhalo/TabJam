@@ -466,3 +466,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .at-selection div {
   background: rgba(64, 64, 255, 0.1);
 }
+
+.person__latency {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
