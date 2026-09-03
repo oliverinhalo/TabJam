@@ -97,6 +97,11 @@ export function useRoom(roomId: string): RoomApi {
   const [audioOutputDeviceId, setAudioOutputDeviceId] = useState<string | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
 
+  // A song chosen while the socket is down would otherwise be emitted into
+  // nothing: the upload succeeds over REST, the room never hears about it, and
+  // the UI just keeps saying "No song loaded".
+  const pendingSongRef = useRef<ResolvedSong | null>(null);
+
   const clockRef = useRef(new ClockSync());
   const [clockSynced, setClockSynced] = useState(false);
   // Chirp announcements are delivered to subscribers rather than through state:
@@ -125,7 +130,19 @@ export function useRoom(roomId: string): RoomApi {
   useEffect(() => {
     if (!roomId) return;
 
-    const socket: TabJamSocket = io({ transports: ['websocket', 'polling'] });
+    /**
+     * Transport order is left at the Socket.IO default (polling, then upgrade
+     * to WebSocket) on purpose.
+     *
+     * Naming the transports with 'websocket' first looks like an optimisation
+     * but is a trap: `tryAllTransports` defaults to false, so the client
+     * attempts only the first entry and gives up rather than falling back. Any
+     * network that blocks a raw WebSocket upgrade — most commonly a reverse
+     * proxy not forwarding Upgrade headers — then fails to connect at all,
+     * which surfaces as a permanently "offline" room. Polling connects
+     * essentially everywhere and silently upgrades when it can.
+     */
+    const socket: TabJamSocket = io();
     socketRef.current = socket;
 
     const join = () => {
@@ -134,6 +151,13 @@ export function useRoom(roomId: string): RoomApi {
           applySnapshot(result.state);
           setJoined(true);
           setError(null);
+
+          // Flush a song picked while the connection was down.
+          const pending = pendingSongRef.current;
+          if (pending) {
+            pendingSongRef.current = null;
+            socket.emit('loadSong', { song: pending });
+          }
         } else {
           setError(result.error);
           setJoined(false);
@@ -225,7 +249,19 @@ export function useRoom(roomId: string): RoomApi {
       setDeviceName(next);
       emit('rename', { name: next });
     },
-    loadSong: (next) => emit('loadSong', { song: next }),
+    loadSong: (next) => {
+      const socket = socketRef.current;
+      if (!socket?.connected) {
+        pendingSongRef.current = next;
+        pushNotice('warn', 'Offline — the song will load once you reconnect.');
+        return;
+      }
+      socket.emit('loadSong', { song: next }, (result) => {
+        if (!result?.ok) {
+          pushNotice('error', result?.error ?? 'Could not load that song.');
+        }
+      });
+    },
     play: (positionMs) => emit('play', { positionMs }),
     pause: (positionMs) => emit('pause', { positionMs }),
     seek: (positionMs) => emit('seek', { positionMs }),

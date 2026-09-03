@@ -430,3 +430,39 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 /* The panel stacks two full-width actions under the metrics. */
 .panel .button + .button { margin-top: 8px; }
 .field--row .button { flex: 1; margin-top: 0; }
+
+/* --- alphaTab playback cursor -------------------------------------------- */
+/*
+ * alphaTab creates the cursor elements but ships no styling for them, so
+ * without this block the score renders correctly and playback runs while
+ * nothing visibly moves — the cursor is there, just fully transparent.
+ *
+ * These class names come from alphaTab itself; they are not ours to rename.
+ * Colours are tuned for the light paper background the score renders on,
+ * not the dark chrome around it.
+ *
+ * Set paint properties only. alphaTab gives each cursor a fixed base box
+ * (300x100 for the beat cursor) and then drives both its position and its size
+ * with an inline `transform: scale(...)`, so a width or height here is either
+ * ignored — inline styles win — or, if forced with !important, silently
+ * corrupts the geometry alphaTab is computing against that base box.
+ */
+.at-cursor-bar {
+  /* Wash over the bar being played. */
+  background: rgba(240, 168, 72, 0.22);
+}
+
+.at-cursor-beat {
+  /* The sliding line. */
+  background: #c96a12;
+}
+
+.at-highlight * {
+  /* Notes currently sounding. */
+  fill: #c96a12;
+  stroke: #c96a12;
+}
+
+.at-selection div {
+  background: rgba(64, 64, 255, 0.1);
+}

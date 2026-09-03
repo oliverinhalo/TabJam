@@ -148,11 +148,43 @@ other than the repo root.
 
 ### Behind a reverse proxy
 
-TabJam needs WebSocket upgrades passed through — that's the only requirement.
-`docker-compose.yml` has a commented Traefik label block as an example; any
-proxy works.
+TabJam works through a proxy out of the box. It connects with HTTP long-polling
+first and upgrades to a WebSocket when the proxy allows it, so a proxy that
+doesn't forward `Upgrade` headers still works — just with slightly more
+overhead. Forwarding them is worth doing anyway.
 
----
+Set `PUBLIC_ORIGIN` in `.env` to your public URL so shared session links point
+at the right hostname:
+
+```bash
+PUBLIC_ORIGIN=https://tabjam.example.com
+```
+
+**nginx**
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;   # these two lines
+    proxy_set_header Connection "upgrade";    # enable WebSockets
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**Caddy** handles WebSockets automatically:
+
+```caddy
+tabjam.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+**Traefik** — see the commented label block in `docker-compose.yml`.
+
+Serving over HTTPS also unlocks the microphone-based Sync check, which browsers
+only allow in a secure context.
 
 ## Running it in development
 
