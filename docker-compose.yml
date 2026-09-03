@@ -1,0 +1,44 @@
+services:
+  tabjam:
+    build: .
+    # Once images are published to GHCR you can swap the build for:
+    # image: ghcr.io/OWNER/tabjam:latest
+    container_name: tabjam
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      # Set this when running behind a reverse proxy so shared session links
+      # point at the public hostname rather than the container.
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-25}"
+    volumes:
+      # Guitar Pro files you add. Drop files in here or upload through the UI.
+      - ./data/library:/app/data/library
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # --- Example: putting TabJam behind Traefik ----------------------------
+    # Uncomment and adjust if that's your reverse proxy. Any other proxy works
+    # too — TabJam only needs WebSocket upgrades to be passed through.
+    #
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.tabjam.rule=Host(`tabjam.example.com`)"
+    #   - "traefik.http.routers.tabjam.entrypoints=websecure"
+    #   - "traefik.http.routers.tabjam.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.tabjam.loadbalancer.server.port=8080"
+    # networks:
+    #   - proxy
+#
+# networks:
+#   proxy:
+#     external: true

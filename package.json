@@ -1,0 +1,24 @@
+{
+  "name": "tabjam",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Synchronized multi-device tab practice for bands",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build -w @tabjam/shared && npm run build -w @tabjam/backend && npm run build -w @tabjam/frontend",
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w @tabjam/backend\" \"npm run dev -w @tabjam/frontend\"",
+    "start": "node backend/dist/index.js",
+    "typecheck": "npm run build -w @tabjam/shared && npm run typecheck -w @tabjam/backend && npm run typecheck -w @tabjam/frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

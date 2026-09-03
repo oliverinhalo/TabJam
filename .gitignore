@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.local
+.DS_Store
+data/library/*
+!data/library/.gitkeep
+npm-debug.log*
+backend/public/
