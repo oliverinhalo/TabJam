@@ -7,19 +7,10 @@ interface Props {
   onChange: (patch: Partial<RoomSettings>) => void;
   /** Bars in the loaded score, for bounding the loop range. */
   barCount: number;
-  /** Local notation scale. */
-  zoom: number;
-  onZoomChange: (zoom: number) => void;
 }
 
 /** Room-wide settings. Every control here changes things for everyone. */
-export function SettingsPanel({
-  settings,
-  onChange,
-  barCount,
-  zoom,
-  onZoomChange,
-}: Props) {
+export function SettingsPanel({ settings, onChange, barCount }: Props) {
   const loop = settings.loopRange;
   return (
     <section className="panel">
@@ -154,21 +145,6 @@ export function SettingsPanel({
         )}
       </div>
 
-      {/* Local: a phone and a laptop want different sizes on the same stand. */}
-      <label className="field">
-        <span className="field__label">
-          Zoom <b>{Math.round(zoom * 100)}%</b>
-          <span className="dim"> · yours only</span>
-        </span>
-        <input
-          type="range"
-          min={0.5}
-          max={2}
-          step={0.1}
-          value={zoom}
-          onChange={(event) => onZoomChange(Number(event.target.value))}
-        />
-      </label>
     </section>
   );
 }

@@ -3,6 +3,7 @@ import { useRoom } from '../lib/useRoom';
 import { useAlphaTab } from '../lib/useAlphaTab';
 import { useCalibration } from '../lib/useCalibration';
 import { stopSpeaking } from '../lib/metronome';
+import { usePreferences } from '../lib/usePreferences';
 import { ScoreView } from '../components/ScoreView';
 import { TransportBar } from '../components/TransportBar';
 import { TrackPicker } from '../components/TrackPicker';
@@ -11,6 +12,7 @@ import { SettingsPanel } from '../components/SettingsPanel';
 import { SongLoader } from '../components/SongLoader';
 import { Notices } from '../components/Notices';
 import { CalibrationPanel } from '../components/CalibrationPanel';
+import { ViewPanel } from '../components/ViewPanel';
 
 interface Props {
   roomId: string;
@@ -20,12 +22,7 @@ export function SessionPage({ roomId }: Props) {
   const room = useRoom(roomId);
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
-  // Zoom is per device: a phone on a music stand and a laptop want different
-  // sizes for the same score, so this is never synced.
-  const [zoom, setZoom] = useState(() => {
-    const stored = Number(localStorage.getItem('tabjam.zoom'));
-    return Number.isFinite(stored) && stored > 0 ? stored : 1;
-  });
+  const [preferences, setPreferences] = usePreferences();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const onContainer = useCallback((element: HTMLElement | null) => {
@@ -57,7 +54,8 @@ export function SessionPage({ roomId }: Props) {
     outputLatencyMs: calibration.result?.outputLatencyMs ?? null,
     listenerOffsetMs: calibration.listenerOffsetMs,
     compensationMs: room.compensationMs,
-    zoom,
+    zoom: preferences.zoom,
+    view: preferences,
   });
 
   // A new song invalidates a track selection made against the previous one.
@@ -180,19 +178,12 @@ export function SessionPage({ roomId }: Props) {
             participantCount={room.participants.filter((p) => p.online).length}
           />
 
+          <ViewPanel preferences={preferences} onChange={setPreferences} />
+
           <SettingsPanel
             settings={room.settings}
             onChange={room.updateSettings}
             barCount={engine.barCount}
-            zoom={zoom}
-            onZoomChange={(next) => {
-              setZoom(next);
-              try {
-                localStorage.setItem('tabjam.zoom', String(next));
-              } catch {
-                // Storage blocked; zoom just won't persist.
-              }
-            }}
           />
         </aside>
       </div>

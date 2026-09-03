@@ -27,6 +27,10 @@ Built to be self-hosted: one container, no accounts, no database.
 - **Loop a section.** Pick a bar range and drill it.
 - **Track mixer.** Mute, solo and volume per track — silence the guitar and play
   it yourself.
+- **Notation, tab or both.** Toggle the standard staff, the tab staff and chords
+  independently — per device, so the singer reads notation while the guitarist
+  reads tab off the same file.
+- **Searchable library.** Search and sort your songs; add a whole set in one go.
 - **Zoom.** Per device, because a phone on a music stand isn't a laptop.
 
 ## Read this before you start: where notation comes from
@@ -104,11 +108,22 @@ genuinely serving, not just running.
 Notation comes from Guitar Pro files you supply — `.gp`, `.gpx`, `.gp5`, `.gp4`
 or `.gp3`. Two ways in, both equivalent:
 
-- **Through the UI** — the file picker in the session sidebar.
+- **Through the UI** — the file picker in the Songs panel takes as many files at
+  once as you like, so a whole set goes in in one go.
 - **On disk** — drop files into `./data/library/` next to the compose file. It's
   bind-mounted into the container, so they appear without a restart.
 
 Naming them `Artist - Title.gp5` gets you a proper title and artist in the UI.
+The Songsterr lookup shows you the exact filename to use for a given song.
+
+The library is searchable and sortable by recent, title or artist, which is
+what makes a few hundred files usable rather than a wall of names.
+
+**On automatic downloading.** TabJam won't sign in to Songsterr for you or bulk
+download from it. Fetching a file you have rights to is yours to do; a tool that
+replays your credentials to pull the catalogue automatically is a different
+thing, and not one this project builds. Multi-file upload exists so that adding
+what you have downloaded is a single step rather than a chore.
 
 ### Everyday commands
 

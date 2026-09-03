@@ -70,6 +70,8 @@ interface UseAlphaTabArgs {
   compensationMs?: number;
   /** Notation scale. Local to this device — a phone needs different zoom to a laptop. */
   zoom?: number;
+  /** Which staves and annotations to draw. Local, like zoom. */
+  view?: { showScore: boolean; showTab: boolean; showChords: boolean };
 }
 
 /**
@@ -94,6 +96,7 @@ export function useAlphaTab({
   listenerOffsetMs,
   compensationMs = 0,
   zoom = 1,
+  view = { showScore: true, showTab: true, showChords: true },
 }: UseAlphaTabArgs): AlphaTabState & {
   seekTo: (ms: number) => void;
   api: alphaTab.AlphaTabApi | null;
@@ -116,6 +119,7 @@ export function useAlphaTab({
   const reportRef = useRef(onPositionReport);
   const outputLatencyRef = useRef(outputLatencyMs);
   const settingsRef = useRef(settings);
+  const viewRef = useRef(view);
   const lastReportRef = useRef(0);
   const lastBarRef = useRef(-1);
 
@@ -124,6 +128,7 @@ export function useAlphaTab({
   reportRef.current = onPositionReport;
   outputLatencyRef.current = outputLatencyMs;
   settingsRef.current = settings;
+  viewRef.current = view;
 
   // --- Instance lifecycle -------------------------------------------------
 
@@ -324,8 +329,11 @@ export function useAlphaTab({
         Object.entries(settings.tracks)
           .map(([index, t]) => [index, t.transposeSemitones, t.capo])
           .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+        view.showScore,
+        view.showTab,
+        view.showChords,
       ]),
-    [settings.transposeSemitones, settings.tracks]
+    [settings.transposeSemitones, settings.tracks, view.showScore, view.showTab, view.showChords]
   );
 
   /**
@@ -366,6 +374,31 @@ export function useAlphaTab({
       );
 
       current.settings.display.scale = zoom;
+
+      /**
+       * Which staves to draw.
+       *
+       * Turning both off would render an empty page, so the preferences hook
+       * keeps at least one on and this only has to pick the matching profile.
+       */
+      current.settings.display.staveProfile =
+        viewRef.current.showScore && viewRef.current.showTab
+          ? alphaTab.StaveProfile.ScoreTab
+          : viewRef.current.showScore
+            ? alphaTab.StaveProfile.Score
+            : alphaTab.StaveProfile.Tab;
+
+      // Chord names sit above the staff; the diagrams are the grids at the top.
+      // They are one control in the UI, so they move together here.
+      current.settings.notation.elements.set(
+        alphaTab.NotationElement.ChordDiagrams,
+        viewRef.current.showChords
+      );
+      current.settings.notation.elements.set(
+        alphaTab.NotationElement.EffectChordNames,
+        viewRef.current.showChords
+      );
+
       current.updateSettings();
       current.render();
 

@@ -556,3 +556,36 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
   padding: 10px 12px 4px;
 }
 .looprange .button { width: 100%; }
+
+/* --- View toggles -------------------------------------------------------- */
+
+.toggles { display: flex; gap: 6px; }
+.toggle {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.toggle:hover { color: var(--text); }
+.toggle.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+/* Library rows carry a delete button beside the pick target. */
+.library li { display: flex; align-items: stretch; gap: 6px; }
+.library__pick { flex: 1; }
+.library__delete { align-self: center; flex: none; }
+.songsterr__result code {
+  background: var(--bg-input);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
