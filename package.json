@@ -13,7 +13,7 @@
     "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w @tabjam/backend\" \"npm run dev -w @tabjam/frontend\"",
     "start": "node backend/dist/index.js",
     "typecheck": "npm run build -w @tabjam/shared && npm run typecheck -w @tabjam/backend && npm run typecheck -w @tabjam/frontend",
-    "test": "tsx scripts/test-dsp.ts"
+    "test": "tsx scripts/test-dsp.ts && tsx scripts/test-pitch.ts && tsx scripts/test-metadata.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

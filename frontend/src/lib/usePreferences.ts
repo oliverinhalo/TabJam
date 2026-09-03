@@ -17,6 +17,14 @@ export interface Preferences {
   showChords: boolean;
   /** Notation scale. */
   zoom: number;
+  /**
+   * Playback volume for this device, 0..1.
+   *
+   * Per device rather than shared: whoever is plugged into the PA and whoever
+   * is monitoring on a phone need very different levels, and one shared number
+   * meant setting it for the room and wrecking it for someone.
+   */
+  volume: number;
 }
 
 const STORAGE_KEY = 'tabjam.preferences';
@@ -28,6 +36,7 @@ const DEFAULTS: Preferences = {
   showTab: true,
   showChords: true,
   zoom: 1,
+  volume: 0.8,
 };
 
 function load(): Preferences {
@@ -41,6 +50,10 @@ function load(): Preferences {
       showChords: parsed.showChords ?? DEFAULTS.showChords,
       zoom:
         typeof parsed.zoom === 'number' && parsed.zoom > 0 ? parsed.zoom : DEFAULTS.zoom,
+      volume:
+        typeof parsed.volume === 'number' && parsed.volume >= 0 && parsed.volume <= 1
+          ? parsed.volume
+          : DEFAULTS.volume,
     };
   } catch {
     return DEFAULTS;

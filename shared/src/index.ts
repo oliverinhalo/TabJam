@@ -127,8 +127,6 @@ export interface LoopRange {
 }
 
 export interface RoomSettings {
-  /** 0..1 */
-  masterVolume: number;
   metronome: MetronomeMode;
   /** Semitones, negative or positive. */
   transposeSemitones: number;
@@ -260,7 +258,8 @@ export interface ClientToServerEvents {
   ) => void;
 
   play: (payload: { positionMs?: number }) => void;
-  pause: (payload: { positionMs: number }) => void;
+  /** Stop. The server decides the position so every device lands on the same one. */
+  pause: () => void;
   seek: (payload: { positionMs: number }) => void;
 
   /**
@@ -381,7 +380,6 @@ export interface ServerToClientEvents {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_SETTINGS: RoomSettings = {
-  masterVolume: 0.8,
   metronome: 'off',
   transposeSemitones: 0,
   playbackSpeed: 1,

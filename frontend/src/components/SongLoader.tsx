@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ResolvedSong, SongsterrMeta } from '@tabjam/shared';
 import { ApiError, api, type LibraryFile } from '../lib/api';
-import { formatBytes } from '../lib/format';
 
 interface Props {
   current: ResolvedSong | null;
@@ -205,7 +204,13 @@ export function SongLoader({ current, history, onLoad }: Props) {
                 >
                   <span className="library__title">{file.title}</span>
                   <span className="library__meta">
-                    {file.artist} · {formatBytes(file.sizeBytes)}
+                    {[
+                      file.artist,
+                      file.key,
+                      file.tempoBpm ? `${file.tempoBpm} bpm` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </span>
                 </button>
                 <button

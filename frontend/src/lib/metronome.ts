@@ -2,51 +2,75 @@
  * Spoken beat counting, for the metronome's 'spoken' mode.
  *
  * alphaTab's built-in metronome covers the click; counting out loud needs the
- * Web Speech API driven from beat events. This only ever runs on the
- * audio-output device — the caller enforces that.
+ * Web Speech API, driven from alphaTab's metronome events. Only ever runs on a
+ * device that is producing audio — the caller enforces that.
  */
 
-/** Speech is queued by the browser, so a backlog would drift behind the music. */
-let lastSpokenAt = 0;
-const MIN_GAP_MS = 120;
+/** Words for the first few beats. Speaking a numeral is slower than a word. */
+const SPOKEN = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
 
-function canSpeak(): boolean {
-  return typeof window !== 'undefined' && 'speechSynthesis' in window;
+let ready = false;
+
+function synth(): SpeechSynthesis | null {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window
+    ? window.speechSynthesis
+    : null;
+}
+
+export function isSpeechAvailable(): boolean {
+  return synth() !== null;
 }
 
 /**
  * Say a beat number.
  *
  * @param beatNumber 1-based beat within the bar.
- * @param isNewBar   True on the downbeat, which gets a firmer delivery.
+ * @param isDownbeat True on beat one, which gets a little more emphasis.
  */
-export function speakBeat(beatNumber: number, isNewBar: boolean): void {
-  if (!canSpeak()) return;
+export function speakBeat(beatNumber: number, isDownbeat: boolean): void {
+  const speech = synth();
+  if (!speech) return;
 
-  const now = Date.now();
-  if (now - lastSpokenAt < MIN_GAP_MS) return;
-  lastSpokenAt = now;
+  /**
+   * Drop this beat rather than queue behind the last one.
+   *
+   * Speech queues, so at any real tempo a backlog builds and the count drifts
+   * further behind the music with every bar. Cancelling first is not the fix
+   * either: cancel() immediately followed by speak() is a well-known way to
+   * have Chrome discard the new utterance and fall silent altogether. Skipping
+   * a beat we are already late for keeps the count on the music.
+   */
+  if (speech.speaking || speech.pending) return;
 
-  // Drop anything still queued so the count never lags the playhead.
-  window.speechSynthesis.cancel();
-
-  const utterance = new SpeechSynthesisUtterance(String(beatNumber));
+  const utterance = new SpeechSynthesisUtterance(
+    SPOKEN[beatNumber - 1] ?? String(beatNumber)
+  );
   // Fast and clipped: this has to fit inside one beat at practice tempos.
-  utterance.rate = 2.2;
-  utterance.pitch = isNewBar ? 1.15 : 1;
+  utterance.rate = 1.6;
+  utterance.pitch = isDownbeat ? 1.2 : 1;
   utterance.volume = 1;
-  window.speechSynthesis.speak(utterance);
+  speech.speak(utterance);
 }
 
 /** Stop any pending speech, e.g. when playback stops or the mode changes. */
 export function stopSpeaking(): void {
-  if (canSpeak()) window.speechSynthesis.cancel();
+  synth()?.cancel();
 }
 
-/** Browsers need a user gesture before speech works; call this from a click. */
+/**
+ * Unlock speech.
+ *
+ * Browsers refuse to speak until the API has been used inside a user gesture,
+ * so this must be called from a click handler. An empty utterance is not enough
+ * on every browser — it needs real text, which is why this speaks a silent word
+ * rather than nothing.
+ */
 export function primeSpeech(): void {
-  if (!canSpeak()) return;
-  const warmup = new SpeechSynthesisUtterance('');
+  const speech = synth();
+  if (!speech || ready) return;
+  ready = true;
+
+  const warmup = new SpeechSynthesisUtterance('one');
   warmup.volume = 0;
-  window.speechSynthesis.speak(warmup);
+  speech.speak(warmup);
 }

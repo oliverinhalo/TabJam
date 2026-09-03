@@ -31,7 +31,9 @@ Built to be self-hosted: one container, no accounts, no database.
   independently — per device, so the singer reads notation while the guitarist
   reads tab off the same file.
 - **Searchable library.** Search and sort your songs; add a whole set in one go.
-- **Zoom.** Per device, because a phone on a music stand isn't a laptop.
+- **Tuner.** Microphone tuner built in, so nobody needs a second app.
+- **Per-device volume and zoom.** Whoever is on the PA and whoever is monitoring
+  on a phone need very different levels.
 
 ## Read this before you start: where notation comes from
 
@@ -284,6 +286,34 @@ capo the Guitar Pro way, raising pitch while the tab stays as written), and
 `displayTranspositionPitches` does not move tab numbers either. So the capo is
 built from the notation transposition offset, with the audio given its own
 value that excludes the capo term. Reading moves; pitch does not.
+
+## Tuner
+
+A microphone tuner lives in the sidebar. It shows the nearest note, how many
+cents off you are, and a needle that centres and turns green in tune. It holds
+the microphone only while it is running, everything is computed on the device,
+and it needs HTTPS like any other microphone feature.
+
+Pitch detection uses the McLeod normalised square difference method rather than
+plain autocorrelation, because plain autocorrelation reports a guitar an octave
+too low as often as not: every multiple of the true period is also a strong
+peak, and a plucked string's harmonics are frequently louder than its
+fundamental. `npm test` checks it against synthetic tones for every guitar and
+bass string, including a deliberately harmonic-heavy one.
+
+## Keeping it up to date
+
+`scripts/auto-update.sh` fetches, and rebuilds only when the branch has actually
+moved. Point cron at it on the host:
+
+```cron
+*/15 * * * * /path/to/TabJam/scripts/auto-update.sh >> /var/log/tabjam-update.log 2>&1
+```
+
+It refuses to run when you have uncommitted changes rather than discarding them,
+and a no-op check costs one lightweight fetch. It is a host cron job rather than
+a container on purpose: rebuilding from inside would mean handing the container
+the Docker socket, which is root on the host in all but name.
 
 ## Practice tools
 

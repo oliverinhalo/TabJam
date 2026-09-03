@@ -16,9 +16,9 @@ export function ViewPanel({ preferences, onChange }: Props) {
   return (
     <section className="panel">
       <div className="panel__header">
-        <h2>Your view</h2>
+        <h2>Your device</h2>
       </div>
-      <p className="panel__hint">Only affects your screen.</p>
+      <p className="panel__hint">Only affects this device.</p>
 
       <div className="field">
         <span className="field__label">Show</span>
@@ -43,6 +43,20 @@ export function ViewPanel({ preferences, onChange }: Props) {
           />
         </div>
       </div>
+
+      <label className="field">
+        <span className="field__label">
+          Volume <b>{Math.round(preferences.volume * 100)}%</b>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={preferences.volume}
+          onChange={(event) => onChange({ volume: Number(event.target.value) })}
+        />
+      </label>
 
       <label className="field">
         <span className="field__label">

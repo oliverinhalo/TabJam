@@ -379,20 +379,45 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 @media (max-width: 860px) {
   .topbar__menu { display: block; }
 
+  /*
+   * On a phone the sidebar takes the whole screen below the top bar.
+   * A 90%-wide drawer left a useless sliver of score behind it and made the
+   * panels cramped exactly where there is least room; the bar stays visible so
+   * the close control and the session code are always reachable.
+   */
   .sidebar {
     position: fixed;
     top: var(--topbar-height);
+    left: 0;
     right: 0;
     bottom: 0;
-    width: min(90vw, var(--sidebar-width));
+    width: 100%;
     transform: translateX(100%);
     transition: transform 180ms ease;
     z-index: 15;
-    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.45);
+    border-left: none;
+    /* Clear the home indicator on phones with gesture bars. */
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
   .sidebar--open { transform: translateX(0); }
 
   .topbar__center { align-items: flex-start; }
+  .topbar__title { font-size: 14px; }
+
+  /* Bigger touch targets: these get pressed mid-song with one hand. */
+  .transport__play { width: 48px; height: 48px; }
+  .tinybtn { width: 30px; height: 30px; }
+  .stepper__controls button { width: 38px; height: 38px; }
+  .toggle { padding: 11px 4px; }
+  .library__pick { padding: 11px 12px; }
+
+  /* iOS zooms the page in when focusing an input under 16px. */
+  input[type="text"], input[type="file"] { font-size: 16px; }
+}
+
+/* Wide screens: the score has room, so give the sidebar a little more too. */
+@media (min-width: 1400px) {
+  :root { --sidebar-width: 380px; }
 }
 
 /* --- Calibration panel --------------------------------------------------- */
@@ -588,4 +613,77 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 11px;
+}
+
+/* Only needed for the full-screen drawer on phones. */
+.sidebar__close { display: none; }
+@media (max-width: 860px) {
+  .sidebar__close {
+    display: block;
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 11px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+}
+
+/* --- Tuner --------------------------------------------------------------- */
+
+.tuner {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 14px 12px;
+  margin-bottom: 12px;
+  text-align: center;
+  transition: border-color 120ms ease;
+}
+.tuner--intune { border-color: var(--ok); }
+.tuner__note {
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.tuner--intune .tuner__note { color: var(--ok); }
+.tuner__cents { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+
+.tuner__meter {
+  position: relative;
+  height: 26px;
+  background: var(--bg);
+  border-radius: 13px;
+  overflow: hidden;
+}
+.tuner__centre {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--border);
+}
+.tuner__needle {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: left 90ms linear, opacity 120ms ease;
+}
+.tuner--intune .tuner__needle { background: var(--ok); }
+.tuner__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
 }

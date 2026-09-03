@@ -60,7 +60,7 @@ export interface RoomApi {
   rename: (name: string) => void;
   loadSong: (song: ResolvedSong) => void;
   play: (positionMs?: number) => void;
-  pause: (positionMs: number) => void;
+  pause: () => void;
   seek: (positionMs: number) => void;
   reportPosition: (positionMs: number, isPlaying: boolean) => void;
   updateSettings: (patch: Partial<RoomSettings>) => void;
@@ -314,7 +314,7 @@ export function useRoom(roomId: string): RoomApi {
       });
     },
     play: (positionMs) => emit('play', { positionMs }),
-    pause: (positionMs) => emit('pause', { positionMs }),
+    pause: () => emit('pause'),
     seek: (positionMs) => emit('seek', { positionMs }),
     reportPosition: (positionMs, isPlaying) =>
       emit('positionReport', { positionMs, isPlaying }),

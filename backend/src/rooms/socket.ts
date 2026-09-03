@@ -105,13 +105,20 @@ export function registerSocketHandlers(io: TabJamServer, rooms: RoomStore): void
       if (transport) io.to(ctx.roomId).emit('transport', transport);
     });
 
-    socket.on('pause', (payload) => {
+    /**
+     * Stop, at a position the server decides.
+     *
+     * The client's own position is deliberately ignored here. Devices genuinely
+     * disagree about "now" — an audio device reports where the sound has got
+     * to, a screen-only device reports its interpolated cursor — so honouring
+     * whoever pressed pause left the room parked slightly apart every time.
+     */
+    socket.on('pause', () => {
       const ctx = contexts.get(socket);
       if (!ctx) return;
-      const positionMs = toPosition(payload?.positionMs);
       const transport = rooms.setTransport(ctx.roomId, {
         isPlaying: false,
-        ...(positionMs !== null ? { positionMs } : {}),
+        positionMs: rooms.currentPosition(ctx.roomId),
       });
       if (transport) io.to(ctx.roomId).emit('transport', transport);
     });

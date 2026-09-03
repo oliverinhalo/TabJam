@@ -13,6 +13,7 @@ import { SongLoader } from '../components/SongLoader';
 import { Notices } from '../components/Notices';
 import { CalibrationPanel } from '../components/CalibrationPanel';
 import { ViewPanel } from '../components/ViewPanel';
+import { TunerPanel } from '../components/TunerPanel';
 
 interface Props {
   roomId: string;
@@ -55,6 +56,7 @@ export function SessionPage({ roomId }: Props) {
     listenerOffsetMs: calibration.listenerOffsetMs,
     compensationMs: room.compensationMs,
     zoom: preferences.zoom,
+    volume: preferences.volume,
     view: preferences,
   });
 
@@ -136,7 +138,7 @@ export function SessionPage({ roomId }: Props) {
             durationMs={engine.durationMs}
             ready={engine.ready && Boolean(room.song)}
             onPlay={() => room.play(engine.positionMs)}
-            onPause={() => room.pause(engine.positionMs)}
+            onPause={room.pause}
             onSeek={(ms) => {
               // Move locally right away so the scrubber feels responsive, then
               // let the broadcast bring everyone else along.
@@ -147,6 +149,14 @@ export function SessionPage({ roomId }: Props) {
         </main>
 
         <aside className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''}`}>
+          <button
+            type="button"
+            className="sidebar__close"
+            onClick={() => setSidebarOpen(false)}
+          >
+            Close
+          </button>
+
           <SongLoader current={room.song} history={room.history} onLoad={room.loadSong} />
 
           <TrackPicker
@@ -179,6 +189,8 @@ export function SessionPage({ roomId }: Props) {
           />
 
           <ViewPanel preferences={preferences} onChange={setPreferences} />
+
+          <TunerPanel />
 
           <SettingsPanel
             settings={room.settings}

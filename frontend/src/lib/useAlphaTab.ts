@@ -70,6 +70,8 @@ interface UseAlphaTabArgs {
   compensationMs?: number;
   /** Notation scale. Local to this device — a phone needs different zoom to a laptop. */
   zoom?: number;
+  /** Playback volume for this device, 0..1. Per device, not shared. */
+  volume?: number;
   /** Which staves and annotations to draw. Local, like zoom. */
   view?: { showScore: boolean; showTab: boolean; showChords: boolean };
 }
@@ -96,6 +98,7 @@ export function useAlphaTab({
   listenerOffsetMs,
   compensationMs = 0,
   zoom = 1,
+  volume = 0.8,
   view = { showScore: true, showTab: true, showChords: true },
 }: UseAlphaTabArgs): AlphaTabState & {
   seekTo: (ms: number) => void;
@@ -121,7 +124,6 @@ export function useAlphaTab({
   const settingsRef = useRef(settings);
   const viewRef = useRef(view);
   const lastReportRef = useRef(0);
-  const lastBarRef = useRef(-1);
 
   isAudioOutputRef.current = isAudioOutput;
   metronomeRef.current = settings.metronome;
@@ -218,17 +220,28 @@ export function useAlphaTab({
       }
     });
 
-    // Spoken count-in / beat counting. alphaTab's own click covers 'click'
-    // mode; 'spoken' needs the beat boundary, which this event gives us.
-    api.playedBeatChanged.on((beat) => {
+    /**
+     * Spoken beat counting.
+     *
+     * Driven by alphaTab's own metronome events rather than note events. The
+     * earlier version counted `playedBeatChanged`, which fires per *note*: a
+     * bar of eighth notes counted to eight, and a bar holding one long chord
+     * never counted past one. The metronome event is emitted on the actual
+     * metrical beat and carries its number in the bar, which is precisely what
+     * needs saying out loud.
+     *
+     * The events are in the generated MIDI regardless of metronome volume, so
+     * spoken mode can keep the click silent.
+     */
+    api.midiEventsPlayedFilter = [alphaTab.midi.MidiEventType.AlphaTabMetronome];
+    api.midiEventsPlayed.on((args) => {
       if (metronomeRef.current !== 'spoken' || !isAudioOutputRef.current) return;
-      const bar = beat.voice?.bar;
-      if (!bar) return;
 
-      const beatNumber = (beat.index ?? 0) + 1;
-      const isNewBar = bar.index !== lastBarRef.current;
-      lastBarRef.current = bar.index;
-      speakBeat(beatNumber, isNewBar);
+      for (const event of args.events) {
+        if (!(event instanceof alphaTab.midi.AlphaTabMetronomeEvent)) continue;
+        const beatNumber = event.metronomeNumerator + 1;
+        speakBeat(beatNumber, event.metronomeNumerator === 0);
+      }
     });
 
     return () => {
@@ -302,14 +315,14 @@ export function useAlphaTab({
     if (!api) return;
 
     // Silence on every device except the one designated to make sound.
-    api.masterVolume = isAudioOutput ? settings.masterVolume : 0;
+    api.masterVolume = isAudioOutput ? volume : 0;
     api.metronomeVolume =
       isAudioOutput && settings.metronome === 'click' ? 1 : 0;
     api.countInVolume = isAudioOutput && settings.countInBars > 0 ? 1 : 0;
     api.playbackSpeed = settings.playbackSpeed;
   }, [
     isAudioOutput,
-    settings.masterVolume,
+    volume,
     settings.metronome,
     settings.countInBars,
     settings.playbackSpeed,
@@ -537,17 +550,31 @@ export function useAlphaTab({
    */
   useEffect(() => {
     const api = apiRef.current;
-    if (!api || !state.ready || isAudioOutput) return;
+    if (!api || !state.ready) return;
+    // While playing, only followers are corrected; the audio device is the clock.
+    if (transport.isPlaying && isAudioOutput) return;
 
     // updatedAt is stamped on the server's clock, so the elapsed time has to be
     // measured on that clock too. Using Date.now() directly here would be wrong
     // by however far this device's clock differs from the server's, which on
     // phones is routinely seconds.
-    const elapsed = transport.isPlaying
-      ? clock.serverNow() - transport.updatedAt
-      : 0;
+    if (!transport.isPlaying) {
+      /**
+       * Stopped: match the room exactly.
+       *
+       * The drift tolerance below exists to stop a *moving* cursor stuttering
+       * as it is nudged. Nothing is moving here, so applying it just left every
+       * device parked up to a tolerance-width apart — visibly out of step the
+       * moment playback stopped.
+       */
+      api.timePosition = Math.max(0, transport.positionMs);
+      return;
+    }
+
     const expected =
-      transport.positionMs + Math.max(0, elapsed) + (listenerOffsetMs ?? 0);
+      transport.positionMs +
+      Math.max(0, clock.serverNow() - transport.updatedAt) +
+      (listenerOffsetMs ?? 0);
 
     if (Math.abs(api.timePosition - expected) > MAX_INTERPOLATION_DRIFT_MS) {
       api.timePosition = Math.max(0, expected);

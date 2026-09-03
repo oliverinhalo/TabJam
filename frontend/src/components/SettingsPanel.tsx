@@ -19,19 +19,6 @@ export function SettingsPanel({ settings, onChange, barCount }: Props) {
       </div>
       <p className="panel__hint">Shared — these apply for everyone.</p>
 
-      <label className="field">
-        <span className="field__label">
-          Volume <b>{Math.round(settings.masterVolume * 100)}%</b>
-        </span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={settings.masterVolume}
-          onChange={(event) => onChange({ masterVolume: Number(event.target.value) })}
-        />
-      </label>
 
       <div className="field">
         <span className="field__label">Metronome</span>

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ResolvedSong } from '@tabjam/shared';
 import { GP_EXTENSIONS, NO_TRACKS, ScoreSourceError, hasGpExtension } from './types.js';
+import { EMPTY_METADATA, readMetadata, type ScoreMetadata } from './metadata.js';
 
 /**
  * Guitar Pro files that live on this server.
@@ -15,17 +16,28 @@ import { GP_EXTENSIONS, NO_TRACKS, ScoreSourceError, hasGpExtension } from './ty
  * file path so they survive a restart without needing a database.
  */
 
-export interface LibraryEntry {
+export interface LibraryEntry extends ScoreMetadata {
   id: string;
   filename: string;
   title: string;
   artist: string;
-  sizeBytes: number;
   modifiedAt: number;
 }
 
 export class LibrarySource {
   readonly kind = 'library' as const;
+
+  /**
+   * Parsed metadata, keyed by filename and invalidated by modification time.
+   *
+   * Parsing every score on every listing would mean re-reading the whole
+   * library each time the panel opens, which is wasteful for files that have
+   * not changed.
+   */
+  private readonly metadataCache = new Map<
+    string,
+    { modifiedAt: number; metadata: ScoreMetadata }
+  >();
 
   constructor(private readonly libraryDir: string) {}
 
@@ -75,6 +87,21 @@ export class LibrarySource {
     return { artist: 'Unknown artist', title: base };
   }
 
+  /** Parse a file's tempo and key, reusing the cached result when unchanged. */
+  private async metadataFor(filename: string, modifiedAt: number): Promise<ScoreMetadata> {
+    const cached = this.metadataCache.get(filename);
+    if (cached && cached.modifiedAt === modifiedAt) return cached.metadata;
+
+    try {
+      const data = await fs.readFile(path.join(this.libraryDir, filename));
+      const metadata = readMetadata(data);
+      this.metadataCache.set(filename, { modifiedAt, metadata });
+      return metadata;
+    } catch {
+      return EMPTY_METADATA;
+    }
+  }
+
   async list(): Promise<LibraryEntry[]> {
     const filenames = await this.listFilenames();
     const entries = await Promise.all(
@@ -86,8 +113,8 @@ export class LibrarySource {
           filename,
           title,
           artist,
-          sizeBytes: stat.size,
           modifiedAt: stat.mtimeMs,
+          ...(await this.metadataFor(filename, stat.mtimeMs)),
         };
       })
     );

@@ -7,8 +7,12 @@ export interface LibraryFile {
   filename: string;
   title: string;
   artist: string;
-  sizeBytes: number;
   modifiedAt: number;
+  /** Parsed from the score itself; null when the file could not be read. */
+  tempoBpm: number | null;
+  key: string | null;
+  barCount: number | null;
+  trackCount: number | null;
 }
 
 export class ApiError extends Error {

@@ -68,7 +68,7 @@ export function calibrationUnsupportedReason(): string | null {
  * mic signal — which is the exact signal being measured here. Leaving it on
  * makes the chirp undetectable.
  */
-async function openMicrophone(): Promise<MediaStream> {
+export async function openMicrophone(): Promise<MediaStream> {
   try {
     return await navigator.mediaDevices.getUserMedia({
       audio: {

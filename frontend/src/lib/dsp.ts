@@ -202,3 +202,111 @@ export function detectChirp(
 
   return { sampleIndex: bestIndex, confidence };
 }
+
+// ---------------------------------------------------------------------------
+// Pitch detection, for the tuner
+// ---------------------------------------------------------------------------
+
+export interface PitchReading {
+  frequencyHz: number;
+  /** 0..1 confidence that this is a real pitched note rather than noise. */
+  clarity: number;
+}
+
+/** Lowest and highest notes worth looking for: a bass low B up past a guitar's top frets. */
+const MIN_PITCH_HZ = 30;
+const MAX_PITCH_HZ = 1400;
+/** Below this the input is treated as silence rather than a very quiet note. */
+const SILENCE_RMS = 0.008;
+/** Peaks weaker than this are noise, not a note. */
+const MIN_CLARITY = 0.85;
+
+/**
+ * Estimate the pitch of a buffer using the McLeod normalised square difference
+ * function.
+ *
+ * Chosen over plain autocorrelation because plain autocorrelation happily
+ * reports a note an octave too low: every multiple of the true period is also a
+ * strong peak. Normalising against the signal's own energy flattens that bias,
+ * and taking the *first* peak within range of the maximum rather than the
+ * highest one keeps it on the fundamental — which matters for a guitar, whose
+ * harmonics are often louder than its fundamental.
+ *
+ * Returns null for silence or anything too unpitched to call.
+ */
+export function detectPitch(
+  samples: Float32Array,
+  sampleRate: number
+): PitchReading | null {
+  const n = samples.length;
+
+  let sumSquares = 0;
+  for (let i = 0; i < n; i++) sumSquares += samples[i] * samples[i];
+  if (Math.sqrt(sumSquares / n) < SILENCE_RMS) return null;
+
+  const minLag = Math.max(2, Math.floor(sampleRate / MAX_PITCH_HZ));
+  const maxLag = Math.min(Math.floor(n / 2), Math.ceil(sampleRate / MIN_PITCH_HZ));
+  if (maxLag <= minLag) return null;
+
+  const nsdf = new Float32Array(maxLag + 1);
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let correlation = 0;
+    let energy = 0;
+    const limit = n - lag;
+    for (let i = 0; i < limit; i++) {
+      const a = samples[i];
+      const b = samples[i + lag];
+      correlation += a * b;
+      energy += a * a + b * b;
+    }
+    nsdf[lag] = energy > 0 ? (2 * correlation) / energy : 0;
+  }
+
+  // Highest peak first, then settle for the earliest peak close to it: that is
+  // the fundamental rather than one of its octaves.
+  let best = 0;
+  for (let lag = minLag; lag <= maxLag; lag++) if (nsdf[lag] > best) best = nsdf[lag];
+  if (best < MIN_CLARITY) return null;
+
+  const threshold = best * 0.9;
+  let chosen = -1;
+  for (let lag = minLag + 1; lag < maxLag; lag++) {
+    const isPeak = nsdf[lag] > nsdf[lag - 1] && nsdf[lag] >= nsdf[lag + 1];
+    if (isPeak && nsdf[lag] >= threshold) {
+      chosen = lag;
+      break;
+    }
+  }
+  if (chosen < 0) return null;
+
+  // Parabolic interpolation around the peak: without it the reading quantises
+  // to whole samples, which near the top of the range is worth tens of cents.
+  const y0 = nsdf[chosen - 1];
+  const y1 = nsdf[chosen];
+  const y2 = nsdf[chosen + 1];
+  const denominator = 2 * (2 * y1 - y0 - y2);
+  const refined = denominator !== 0 ? chosen + (y2 - y0) / denominator : chosen;
+
+  return { frequencyHz: sampleRate / refined, clarity: nsdf[chosen] };
+}
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+export interface NoteReading {
+  /** e.g. "E2" */
+  name: string;
+  /** How far off, in cents. Negative is flat, positive sharp. */
+  cents: number;
+  frequencyHz: number;
+}
+
+/** Convert a frequency to the nearest note and how far off it is. */
+export function frequencyToNote(frequencyHz: number, concertA = 440): NoteReading {
+  const midi = 69 + 12 * Math.log2(frequencyHz / concertA);
+  const nearest = Math.round(midi);
+  return {
+    name: `${NOTE_NAMES[((nearest % 12) + 12) % 12]}${Math.floor(nearest / 12) - 1}`,
+    cents: Math.round((midi - nearest) * 100),
+    frequencyHz,
+  };
+}

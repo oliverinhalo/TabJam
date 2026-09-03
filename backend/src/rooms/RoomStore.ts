@@ -198,6 +198,24 @@ export class RoomStore {
     return state.transport;
   }
 
+  /**
+   * Where the room is right now, extrapolated from the last known position.
+   *
+   * Used when stopping, so the pause lands on one agreed position instead of
+   * whichever client happened to press the button. Clients disagree: an audio
+   * device reports where the sound has reached, a screen-only device reports
+   * its own interpolated cursor, and taking either as truth left everyone
+   * parked a few hundred milliseconds apart.
+   */
+  currentPosition(roomId: string): number {
+    const state = this.get(roomId);
+    if (!state) return 0;
+
+    const { transport } = state;
+    if (!transport.isPlaying) return transport.positionMs;
+    return transport.positionMs + Math.max(0, Date.now() - transport.updatedAt);
+  }
+
   updateSettings(roomId: string, patch: Partial<RoomSettings>): RoomSettings | null {
     const state = this.get(roomId);
     if (!state) return null;
@@ -335,9 +353,6 @@ export class RoomStore {
 function sanitizeSettings(patch: Partial<RoomSettings>): Partial<RoomSettings> {
   const clean: Partial<RoomSettings> = {};
 
-  if (patch.masterVolume !== undefined) {
-    clean.masterVolume = clamp(patch.masterVolume, 0, 1);
-  }
   if (patch.metronome !== undefined && ['off', 'click', 'spoken'].includes(patch.metronome)) {
     clean.metronome = patch.metronome;
   }
