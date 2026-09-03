@@ -22,6 +22,12 @@ Built to be self-hosted: one container, no accounts, no database.
   transpose, speed and loop apply to the whole room.
 - **Song switching.** Load a different song into the same room mid-practice;
   earlier songs stay one click away.
+- **Transpose and capo.** Room-wide transpose, plus per-track transpose and a
+  per-track capo.
+- **Loop a section.** Pick a bar range and drill it.
+- **Track mixer.** Mute, solo and volume per track — silence the guitar and play
+  it yourself.
+- **Zoom.** Per device, because a phone on a music stand isn't a laptop.
 
 ## Read this before you start: where notation comes from
 
@@ -237,6 +243,43 @@ off entirely would mean no cursor at all. A silent local synth gives smooth
 cursor motion for free and needs the network only for drift correction.
 
 ---
+
+## Transpose vs capo
+
+They are different things and TabJam treats them differently.
+
+**Transpose** moves the music. Set it room-wide in Room settings, or per track in
+the track list — the two add together, so a room-wide `-2` with a track at `+1`
+puts that track at `-1`. Both what you read and what you hear move, so the band
+stays in one key.
+
+**Capo** does not move the music. It renumbers the frets to what you actually
+press with a capo on, and the pitch is unchanged — put a capo on 2 and a part
+written at fret 5 reads as fret 3, sounding exactly as before. It is per track,
+because only some of you have a capo on.
+
+Both use steppers rather than sliders. A slider fires a change per pixel of a
+drag, and each one costs a room-wide round trip and a full score re-render, so
+the value you land on could be lost in the queue — which looks exactly like a
+particular value "not working". One press, one change.
+
+A note on how capo is built, since it is not obvious from the code: alphaTab's
+own `Staff.capo` was measured to leave the written frets untouched (it models a
+capo the Guitar Pro way, raising pitch while the tab stays as written), and
+`displayTranspositionPitches` does not move tab numbers either. So the capo is
+built from the notation transposition offset, with the audio given its own
+value that excludes the capo term. Reading moves; pitch does not.
+
+## Practice tools
+
+- **Loop a section.** *Loop a section* in Room settings picks a bar range and
+  repeats it. Shared, so everyone drills the same four bars.
+- **Track mixer.** Each track in the track list has mute, solo and volume,
+  shared with the room. Mute the part you are playing and the rest keeps going.
+- **Speed.** Playback rate without changing pitch.
+- **Count-in.** A bar of clicks before playback starts.
+- **Zoom.** Notation size, local to your device — it is not synced, for the same
+  reason track *visibility* is not.
 
 ## Sync check (acoustic calibration)
 

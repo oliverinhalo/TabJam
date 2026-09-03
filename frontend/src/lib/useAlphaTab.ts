@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as alphaTab from '@coderline/alphatab';
 import {
   MAX_INTERPOLATION_DRIFT_MS,
   POSITION_REPORT_INTERVAL_MS,
+  displayTranspose,
+  effectiveTranspose,
+  trackSettings,
   type RoomSettings,
   type TrackInfo,
   type TransportState,
@@ -31,6 +34,8 @@ export interface AlphaTabState {
   durationMs: number;
   /** Current playback position in ms. Updates continuously during playback. */
   positionMs: number;
+  /** Number of bars in the loaded score, for bounding the loop controls. */
+  barCount: number;
 }
 
 interface UseAlphaTabArgs {
@@ -63,6 +68,8 @@ interface UseAlphaTabArgs {
    * whenever nothing has been calibrated.
    */
   compensationMs?: number;
+  /** Notation scale. Local to this device — a phone needs different zoom to a laptop. */
+  zoom?: number;
 }
 
 /**
@@ -86,6 +93,7 @@ export function useAlphaTab({
   outputLatencyMs,
   listenerOffsetMs,
   compensationMs = 0,
+  zoom = 1,
 }: UseAlphaTabArgs): AlphaTabState & {
   seekTo: (ms: number) => void;
   api: alphaTab.AlphaTabApi | null;
@@ -98,6 +106,7 @@ export function useAlphaTab({
     tracks: [],
     durationMs: 0,
     positionMs: 0,
+    barCount: 0,
   });
 
   // Kept in refs so the event handlers below never go stale without needing to
@@ -106,6 +115,7 @@ export function useAlphaTab({
   const metronomeRef = useRef(settings.metronome);
   const reportRef = useRef(onPositionReport);
   const outputLatencyRef = useRef(outputLatencyMs);
+  const settingsRef = useRef(settings);
   const lastReportRef = useRef(0);
   const lastBarRef = useRef(-1);
 
@@ -113,6 +123,7 @@ export function useAlphaTab({
   metronomeRef.current = settings.metronome;
   reportRef.current = onPositionReport;
   outputLatencyRef.current = outputLatencyMs;
+  settingsRef.current = settings;
 
   // --- Instance lifecycle -------------------------------------------------
 
@@ -164,7 +175,13 @@ export function useAlphaTab({
         isGuitar: false,
         isVocals: false,
       }));
-      setState((s) => ({ ...s, tracks, loading: false, error: null }));
+      setState((s) => ({
+        ...s,
+        tracks,
+        barCount: score.masterBars.length,
+        loading: false,
+        error: null,
+      }));
     });
 
     api.playerReady.on(() => setState((s) => ({ ...s, ready: true })));
@@ -219,6 +236,7 @@ export function useAlphaTab({
         tracks: [],
         durationMs: 0,
         positionMs: 0,
+        barCount: 0,
       });
     };
   }, [container]);
@@ -284,28 +302,152 @@ export function useAlphaTab({
       isAudioOutput && settings.metronome === 'click' ? 1 : 0;
     api.countInVolume = isAudioOutput && settings.countInBars > 0 ? 1 : 0;
     api.playbackSpeed = settings.playbackSpeed;
-    api.isLooping = settings.loop;
   }, [
     isAudioOutput,
     settings.masterVolume,
     settings.metronome,
     settings.countInBars,
     settings.playbackSpeed,
-    settings.loop,
   ]);
 
-  // Transposition changes both what is displayed and what is played, so it
-  // needs a settings update plus a re-render rather than a synth property.
+  /**
+   * A key over just the values that change what is drawn.
+   *
+   * The settings object is replaced on every room broadcast, so depending on it
+   * directly would re-render the whole score when someone nudges a track's
+   * volume. Re-layout is the expensive operation here; muting is not.
+   */
+  const renderKey = useMemo(
+    () =>
+      JSON.stringify([
+        settings.transposeSemitones,
+        Object.entries(settings.tracks)
+          .map(([index, t]) => [index, t.transposeSemitones, t.capo])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      ]),
+    [settings.transposeSemitones, settings.tracks]
+  );
+
+  /**
+   * Transposition, capo and zoom — everything that forces a re-render.
+   *
+   * Grouped into one debounced effect on purpose. A re-render of a full score
+   * is expensive, and these controls change in bursts (dragging a slider fires
+   * per pixel). Applying each intermediate value queues renders faster than
+   * they complete and the final one can be lost, which shows up as a setting
+   * that "doesn't work" when it was simply the value that got dropped.
+   * Debouncing means only the value you land on is ever applied.
+   */
   useEffect(() => {
     const api = apiRef.current;
-    if (!api || !api.score) return;
+    if (!api?.score) return;
 
-    const trackCount = api.score.tracks.length;
-    const pitches = new Array<number>(trackCount).fill(settings.transposeSemitones);
-    api.settings.notation.transpositionPitches = pitches;
-    api.updateSettings();
-    api.render();
-  }, [settings.transposeSemitones, state.tracks.length]);
+    const timer = setTimeout(() => {
+      const current = apiRef.current;
+      if (!current?.score) return;
+
+      const tracks = current.score.tracks;
+      const live = settingsRef.current;
+
+      /**
+       * What gets drawn: the sounding transpose minus the capo.
+       *
+       * Capo is built out of this rather than alphaTab's own `Staff.capo`,
+       * which was measured to leave the written frets untouched — it models a
+       * capo the Guitar Pro way, raising pitch while the tab stays as written.
+       * That is the opposite of what a player wants from a capo control, which
+       * is to see the frets they actually press. `displayTranspositionPitches`
+       * does not move tab numbers either, so the notation offset is the only
+       * lever that does, and the audio is kept in the original key by giving
+       * the player its own value below.
+       */
+      current.settings.notation.transpositionPitches = tracks.map((_, index) =>
+        displayTranspose(live, index)
+      );
+
+      current.settings.display.scale = zoom;
+      current.updateSettings();
+      current.render();
+
+      /**
+       * Transpose the audio.
+       *
+       * The notation setting only changes what is drawn; the synth goes on
+       * playing the MIDI it already loaded. Without this the tab moves and the
+       * sound does not, which is worse than no transpose at all because the two
+       * disagree.
+       *
+       * Note this deliberately uses effectiveTranspose, not displayTranspose:
+       * the capo term is excluded so a capo renumbers the frets while the room
+       * keeps playing in the same key. The player keys these by MIDI channel
+       * rather than by track.
+       */
+      const byChannel = new Map<number, number>();
+      for (const [index, track] of tracks.entries()) {
+        const semitones = effectiveTranspose(live, index);
+        const info = track.playbackInfo;
+        if (!info) continue;
+        byChannel.set(info.primaryChannel, semitones);
+        byChannel.set(info.secondaryChannel, semitones);
+      }
+      current.player?.applyTranspositionPitches(byChannel);
+    }, 250);
+
+    return () => clearTimeout(timer);
+    // settingsRef keeps the latest values without making this effect depend on
+    // the whole settings object; renderKey decides when a re-render is due.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderKey, zoom, state.tracks.length]);
+
+  /**
+   * Track mixing. Cheap synth-side changes, so no debounce and no re-render:
+   * muting a track you are about to play yourself should feel instant.
+   */
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api?.score) return;
+
+    for (const [index, track] of api.score.tracks.entries()) {
+      const own = trackSettings(settings, index);
+      api.changeTrackMute([track], own.muted);
+      api.changeTrackSolo([track], own.solo);
+      api.changeTrackVolume([track], own.volume);
+    }
+  }, [settings.tracks, state.tracks.length]);
+
+  /**
+   * Loop a bar range, for drilling one hard passage.
+   *
+   * Bars are 1-based in the UI because that is how people count them; alphaTab
+   * wants MIDI ticks, which come off the master bar list.
+   */
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api?.score) return;
+
+    const range = settings.loopRange;
+    if (!range) {
+      api.playbackRange = null;
+      api.isLooping = settings.loop;
+      return;
+    }
+
+    const bars = api.score.masterBars;
+    const first = bars[Math.min(range.startBar, bars.length) - 1];
+    const last = bars[Math.min(range.endBar, bars.length) - 1];
+    if (!first || !last) {
+      api.playbackRange = null;
+      return;
+    }
+
+    api.playbackRange = {
+      startTick: first.start,
+      endTick: last.start + last.calculateDuration(),
+    };
+    // A range with looping off would play the section once and stop, which is
+    // never what selecting a practice range means.
+    api.isLooping = true;
+  }, [settings.loopRange, settings.loop, state.tracks.length]);
 
   // --- Transport ----------------------------------------------------------
 

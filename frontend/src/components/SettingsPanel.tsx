@@ -1,13 +1,26 @@
-import type { RoomSettings } from '@tabjam/shared';
+import { MAX_TRANSPOSE_SEMITONES, type RoomSettings } from '@tabjam/shared';
 import { primeSpeech } from '../lib/metronome';
+import { Stepper, formatSemitones } from './Stepper';
 
 interface Props {
   settings: RoomSettings;
   onChange: (patch: Partial<RoomSettings>) => void;
+  /** Bars in the loaded score, for bounding the loop range. */
+  barCount: number;
+  /** Local notation scale. */
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
 }
 
 /** Room-wide settings. Every control here changes things for everyone. */
-export function SettingsPanel({ settings, onChange }: Props) {
+export function SettingsPanel({
+  settings,
+  onChange,
+  barCount,
+  zoom,
+  onZoomChange,
+}: Props) {
+  const loop = settings.loopRange;
   return (
     <section className="panel">
       <div className="panel__header">
@@ -49,25 +62,15 @@ export function SettingsPanel({ settings, onChange }: Props) {
         </div>
       </div>
 
-      <label className="field">
-        <span className="field__label">
-          Transpose{' '}
-          <b>
-            {settings.transposeSemitones > 0 ? '+' : ''}
-            {settings.transposeSemitones}
-          </b>
-        </span>
-        <input
-          type="range"
-          min={-12}
-          max={12}
-          step={1}
-          value={settings.transposeSemitones}
-          onChange={(event) =>
-            onChange({ transposeSemitones: Number(event.target.value) })
-          }
-        />
-      </label>
+      <Stepper
+        label="Transpose"
+        value={settings.transposeSemitones}
+        min={-MAX_TRANSPOSE_SEMITONES}
+        max={MAX_TRANSPOSE_SEMITONES}
+        onChange={(transposeSemitones) => onChange({ transposeSemitones })}
+        format={formatSemitones}
+        title="Shifts the whole room. Per-track shifts add on top, in the track list."
+      />
 
       <label className="field">
         <span className="field__label">
@@ -89,8 +92,9 @@ export function SettingsPanel({ settings, onChange }: Props) {
             type="checkbox"
             checked={settings.loop}
             onChange={(event) => onChange({ loop: event.target.checked })}
+            disabled={loop !== null}
           />
-          <span>Loop</span>
+          <span>Loop all</span>
         </label>
 
         <label className="checkbox">
@@ -102,6 +106,69 @@ export function SettingsPanel({ settings, onChange }: Props) {
           <span>Count-in</span>
         </label>
       </div>
+
+      {/* Drilling one passage is most of what practice actually is. */}
+      <div className="field">
+        <span className="field__label">
+          Loop section {loop && <b>bars {loop.startBar}&ndash;{loop.endBar}</b>}
+        </span>
+        {loop ? (
+          <div className="looprange">
+            <Stepper
+              label="From"
+              value={loop.startBar}
+              min={1}
+              max={Math.max(1, barCount)}
+              onChange={(startBar) =>
+                onChange({ loopRange: { startBar, endBar: Math.max(startBar, loop.endBar) } })
+              }
+            />
+            <Stepper
+              label="To"
+              value={loop.endBar}
+              min={1}
+              max={Math.max(1, barCount)}
+              onChange={(endBar) =>
+                onChange({ loopRange: { startBar: Math.min(loop.startBar, endBar), endBar } })
+              }
+            />
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => onChange({ loopRange: null })}
+            >
+              Clear section
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={barCount === 0}
+            onClick={() =>
+              onChange({ loopRange: { startBar: 1, endBar: Math.min(4, barCount) } })
+            }
+          >
+            {barCount === 0 ? 'Load a song first' : 'Loop a section'}
+          </button>
+        )}
+      </div>
+
+      {/* Local: a phone and a laptop want different sizes on the same stand. */}
+      <label className="field">
+        <span className="field__label">
+          Zoom <b>{Math.round(zoom * 100)}%</b>
+          <span className="dim"> · yours only</span>
+        </span>
+        <input
+          type="range"
+          min={0.5}
+          max={2}
+          step={0.1}
+          value={zoom}
+          onChange={(event) => onZoomChange(Number(event.target.value))}
+        />
+      </label>
     </section>
   );
 }

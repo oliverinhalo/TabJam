@@ -1,7 +1,10 @@
 import {
   DEFAULT_SETTINGS,
   DEFAULT_TRANSPORT,
+  DEFAULT_TRACK_SETTINGS,
   MAX_CALIBRATION_OFFSET_MS,
+  MAX_CAPO_FRET,
+  MAX_TRANSPOSE_SEMITONES,
   type Participant,
   type ResolvedSong,
   type RoomSettings,
@@ -339,7 +342,9 @@ function sanitizeSettings(patch: Partial<RoomSettings>): Partial<RoomSettings> {
     clean.metronome = patch.metronome;
   }
   if (patch.transposeSemitones !== undefined) {
-    clean.transposeSemitones = Math.round(clamp(patch.transposeSemitones, -12, 12));
+    clean.transposeSemitones = Math.round(
+      clamp(patch.transposeSemitones, -MAX_TRANSPOSE_SEMITONES, MAX_TRANSPOSE_SEMITONES)
+    );
   }
   if (patch.playbackSpeed !== undefined) {
     clean.playbackSpeed = clamp(patch.playbackSpeed, 0.25, 2);
@@ -349,6 +354,61 @@ function sanitizeSettings(patch: Partial<RoomSettings>): Partial<RoomSettings> {
   }
   if (patch.countInBars !== undefined) {
     clean.countInBars = Math.round(clamp(patch.countInBars, 0, 4));
+  }
+  if (patch.loopRange !== undefined) {
+    clean.loopRange = sanitizeLoopRange(patch.loopRange);
+  }
+  if (patch.tracks !== undefined) {
+    clean.tracks = sanitizeTracks(patch.tracks);
+  }
+  return clean;
+}
+
+/** A loop needs a sane, ordered, 1-based bar range or none at all. */
+function sanitizeLoopRange(range: RoomSettings['loopRange']): RoomSettings['loopRange'] {
+  if (!range || typeof range !== 'object') return null;
+
+  const start = Math.round(Number(range.startBar));
+  const end = Math.round(Number(range.endBar));
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  if (start < 1 || end < 1) return null;
+
+  // Accept a reversed range rather than rejecting it; dragging a selection
+  // backwards is a normal thing to do.
+  return { startBar: Math.min(start, end), endBar: Math.max(start, end) };
+}
+
+/**
+ * Clamp per-track settings.
+ *
+ * The whole map is replaced rather than merged: the client always sends the
+ * complete set it wants, so a merge would make removing a track's override
+ * impossible.
+ */
+function sanitizeTracks(
+  tracks: RoomSettings['tracks']
+): RoomSettings['tracks'] {
+  if (!tracks || typeof tracks !== 'object') return {};
+
+  const clean: RoomSettings['tracks'] = {};
+  for (const [key, value] of Object.entries(tracks)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || index > 512) continue;
+    if (!value || typeof value !== 'object') continue;
+
+    clean[String(index)] = {
+      transposeSemitones: Math.round(
+        clamp(
+          Number(value.transposeSemitones ?? 0),
+          -MAX_TRANSPOSE_SEMITONES,
+          MAX_TRANSPOSE_SEMITONES
+        )
+      ),
+      capo: Math.round(clamp(Number(value.capo ?? 0), 0, MAX_CAPO_FRET)),
+      muted: Boolean(value.muted),
+      solo: Boolean(value.solo),
+      volume: clamp(Number(value.volume ?? DEFAULT_TRACK_SETTINGS.volume), 0, 1),
+    };
   }
   return clean;
 }

@@ -20,6 +20,12 @@ export function SessionPage({ roomId }: Props) {
   const room = useRoom(roomId);
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
+  // Zoom is per device: a phone on a music stand and a laptop want different
+  // sizes for the same score, so this is never synced.
+  const [zoom, setZoom] = useState(() => {
+    const stored = Number(localStorage.getItem('tabjam.zoom'));
+    return Number.isFinite(stored) && stored > 0 ? stored : 1;
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const onContainer = useCallback((element: HTMLElement | null) => {
@@ -51,6 +57,7 @@ export function SessionPage({ roomId }: Props) {
     outputLatencyMs: calibration.result?.outputLatencyMs ?? null,
     listenerOffsetMs: calibration.listenerOffsetMs,
     compensationMs: room.compensationMs,
+    zoom,
   });
 
   // A new song invalidates a track selection made against the previous one.
@@ -148,6 +155,8 @@ export function SessionPage({ roomId }: Props) {
             tracks={engine.tracks}
             selected={selectedTracks}
             onChange={setSelectedTracks}
+            settings={room.settings}
+            onSettingsChange={room.updateSettings}
           />
 
           <ParticipantList
@@ -171,7 +180,20 @@ export function SessionPage({ roomId }: Props) {
             participantCount={room.participants.filter((p) => p.online).length}
           />
 
-          <SettingsPanel settings={room.settings} onChange={room.updateSettings} />
+          <SettingsPanel
+            settings={room.settings}
+            onChange={room.updateSettings}
+            barCount={engine.barCount}
+            zoom={zoom}
+            onZoomChange={(next) => {
+              setZoom(next);
+              try {
+                localStorage.setItem('tabjam.zoom', String(next));
+              } catch {
+                // Storage blocked; zoom just won't persist.
+              }
+            }}
+          />
         </aside>
       </div>
 

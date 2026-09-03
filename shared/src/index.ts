@@ -86,6 +86,46 @@ export interface TransportState {
   updatedAt: number;
 }
 
+/**
+ * Per-track settings, shared with the room.
+ *
+ * Keyed by track index in RoomSettings.tracks. Absent entries mean defaults,
+ * so a room that has never touched a track carries nothing for it.
+ */
+export interface TrackSettings {
+  /**
+   * Semitone shift for this track alone, added to the room-wide transpose.
+   * Use this when one instrument needs shifting and the rest do not.
+   */
+  transposeSemitones: number;
+  /**
+   * Capo position in frets.
+   *
+   * Distinct from transposing: a capo leaves the sounding pitch alone and
+   * renumbers the frets, so a part written at fret 5 reads as fret 3 with a
+   * capo on 2 — what the player actually has to press.
+   */
+  capo: number;
+  muted: boolean;
+  solo: boolean;
+  /** 0..1 */
+  volume: number;
+}
+
+export const DEFAULT_TRACK_SETTINGS: TrackSettings = {
+  transposeSemitones: 0,
+  capo: 0,
+  muted: false,
+  solo: false,
+  volume: 1,
+};
+
+/** Bar range to loop over, 1-based and inclusive. */
+export interface LoopRange {
+  startBar: number;
+  endBar: number;
+}
+
 export interface RoomSettings {
   /** 0..1 */
   masterVolume: number;
@@ -98,6 +138,13 @@ export interface RoomSettings {
   loop: boolean;
   /** Count-in bars before playback starts. 0 disables it. */
   countInBars: number;
+  /**
+   * Per-track overrides, keyed by track index as a string.
+   * Sparse: only tracks somebody has changed appear here.
+   */
+  tracks: Record<string, TrackSettings>;
+  /** Bars to loop between, or null to play the whole score. */
+  loopRange: LoopRange | null;
 }
 
 export interface Participant {
@@ -340,7 +387,52 @@ export const DEFAULT_SETTINGS: RoomSettings = {
   playbackSpeed: 1,
   loop: false,
   countInBars: 0,
+  tracks: {},
+  loopRange: null,
 };
+
+/** Transpose range offered in the UI, in semitones. */
+export const MAX_TRANSPOSE_SEMITONES = 12;
+/** Highest capo position offered. Beyond this there is not much neck left. */
+export const MAX_CAPO_FRET = 12;
+
+/** Resolve a track's settings, falling back to defaults. */
+export function trackSettings(
+  settings: RoomSettings,
+  trackIndex: number
+): TrackSettings {
+  return settings.tracks[String(trackIndex)] ?? DEFAULT_TRACK_SETTINGS;
+}
+
+/**
+ * Total semitone shift for a track: the room-wide transpose plus its own.
+ *
+ * Capo is deliberately not part of this. A capo changes which frets you press,
+ * not the pitch that comes out, so folding it in here would transpose the audio
+ * by the capo position and put the whole room in the wrong key.
+ */
+export function effectiveTranspose(
+  settings: RoomSettings,
+  trackIndex: number
+): number {
+  return settings.transposeSemitones + trackSettings(settings, trackIndex).transposeSemitones;
+}
+
+/**
+ * Semitone shift to *draw* a track at, which is the sounding transpose minus
+ * the capo.
+ *
+ * A capo at fret 2 means every note is fretted two lower than written while
+ * sounding the same, so the tab has to read two lower. Pairing this with
+ * {@link effectiveTranspose} for the audio is what separates the two: what you
+ * read moves, what you hear does not.
+ */
+export function displayTranspose(
+  settings: RoomSettings,
+  trackIndex: number
+): number {
+  return effectiveTranspose(settings, trackIndex) - trackSettings(settings, trackIndex).capo;
+}
 
 export const DEFAULT_TRANSPORT: TransportState = {
   isPlaying: false,

@@ -472,3 +472,87 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Steppers, mixer rows, loop range ------------------------------------ */
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.stepper__label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.stepper__controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.stepper__controls button {
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.stepper__controls button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.stepper__controls button:disabled { opacity: 0.3; cursor: not-allowed; }
+.stepper__value {
+  min-width: 62px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Compact mute/solo/expand buttons on a track row. */
+.tinybtn {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.tinybtn:hover { color: var(--text); }
+.tinybtn.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.trackrow { margin-bottom: 2px; }
+.trackrow__detail {
+  padding: 10px 10px 2px 30px;
+  border-left: 2px solid var(--border);
+  margin: 4px 0 10px 10px;
+}
+.trackrow__detail .field { margin-bottom: 10px; }
+
+/* A track silenced by someone else's solo should look inactive. */
+.track__name--silenced { opacity: 0.45; text-decoration: line-through; }
+
+.looprange {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px 4px;
+}
+.looprange .button { width: 100%; }
