@@ -19,7 +19,10 @@ COPY backend/package.json ./backend/
 COPY frontend/package.json ./frontend/
 RUN npm ci --no-audit --no-fund
 
-# Then the sources.
+# Then the sources. scripts/ is needed too: the frontend's prebuild step runs
+# scripts/copy-fonts.mjs to place alphaTab's music font, without which the
+# score renders blank.
+COPY scripts ./scripts
 COPY shared ./shared
 COPY backend ./backend
 COPY frontend ./frontend

@@ -328,6 +328,22 @@ home server; don't put this on the public internet and expect privacy.
 - alphaTab ships **no soundfont** in the npm package, so the synth loads one from
   a CDN by default. For a fully offline install, self-host a `.sf3` and set
   `VITE_SOUNDFONT_URL` at build time.
+- **The music font is load-bearing, and its failure is silent.** alphaTab draws
+  notation with the Bravura SMuFL font and will not render a single note without
+  it — it logs "Font not available, rendering cannot start" and stops, while the
+  synth carries on. The symptom is a blank score that plays audio perfectly,
+  which looks like a CSS or layout problem and is not.
+
+  Two things have to line up. `core.fontDirectory` is pinned to `/font/` in
+  `useAlphaTab.ts`, because alphaTab otherwise derives it from its own script
+  URL — which resolves to `/assets/font/` in a build and into Vite's pre-bundle
+  directory in dev, neither of which holds the font. And the font is placed in
+  `frontend/public/font/` by `scripts/copy-fonts.mjs` (run automatically before
+  dev and build) rather than by the alphaTab plugin's own asset copy, which
+  races Vite emptying `outDir` and so shipped the font only on some builds.
+
+  If the score ever goes blank again, open the console and look for that font
+  message before anything else.
 
 ---
 

@@ -7,3 +7,4 @@ data/library/*
 !data/library/.gitkeep
 npm-debug.log*
 backend/public/
+frontend/public/font/

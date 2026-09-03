@@ -113,7 +113,25 @@ export function useAlphaTab({
     if (!container) return;
 
     const api = new alphaTab.AlphaTabApi(container, {
-      core: { engine: 'svg', logLevel: alphaTab.LogLevel.Warning },
+      core: {
+        engine: 'svg',
+        logLevel: alphaTab.LogLevel.Warning,
+        /**
+         * Pin the music font location.
+         *
+         * alphaTab renders notation with the Bravura SMuFL font and refuses to
+         * render at all if it cannot load it — "Font not available, rendering
+         * cannot start" — while the synth carries on regardless. That failure
+         * mode is a silent blank score with working audio.
+         *
+         * Left to itself alphaTab derives this path from its own script URL,
+         * which lands on /assets/font/ in a production build and inside Vite's
+         * pre-bundle directory in dev. The font is at neither: the plugin emits
+         * it to /font/. Both cases then 404 into the SPA fallback and the
+         * browser tries to parse index.html as a font.
+         */
+        fontDirectory: '/font/',
+      },
       display: { scale: 0.9, stretchForce: 0.85 },
       player: {
         // 'enablePlayer' is what gives us both audio and the cursor.
