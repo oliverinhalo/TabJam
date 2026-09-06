@@ -16,8 +16,10 @@ Built to be self-hosted: one container, no accounts, no database.
   drums. Track selection is local and never synced — that's the point.
 - **Locked playhead.** Play, pause and seek from any device; every cursor
   follows.
-- **One audio device.** Exactly one device produces sound (whoever's plugged
-  into the PA). Anyone can claim it with a button.
+- **Audio where you want it.** Any device can produce sound, and several can at
+  once — each waits for the slowest so they land together rather than as a flam.
+- **A tab per player.** Two people on one computer with two screens are two
+  participants, each reading their own part.
 - **Shared controls.** Volume, metronome (click *or* a spoken beat count),
   transpose, speed and loop apply to the whole room.
 - **Song switching.** Load a different song into the same room mid-practice;
@@ -34,6 +36,21 @@ Built to be self-hosted: one container, no accounts, no database.
 - **Tuner.** Microphone tuner built in, so nobody needs a second app.
 - **Per-device volume and zoom.** Whoever is on the PA and whoever is monitoring
   on a phone need very different levels.
+
+## Several people on one computer
+
+Each browser tab is its own player. Open the session link in two tabs and you
+get two participants, each choosing its own tracks — which is the point when two
+people are reading different parts off one machine with two screens.
+
+Identity is per tab rather than per browser for exactly that reason. Tabs do
+share their speakers though, so only one of them produces sound: claiming audio
+in one tab makes the others on that machine stand down, instead of playing the
+same part twice a few milliseconds apart.
+
+Each tab asks who is at that screen when it joins. Skipping is a real option —
+it falls back to the device name, which is the right answer when one person is
+on one device.
 
 ## Read this before you start: where notation comes from
 
