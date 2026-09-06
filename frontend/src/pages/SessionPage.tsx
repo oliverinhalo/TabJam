@@ -4,6 +4,7 @@ import { useAlphaTab } from '../lib/useAlphaTab';
 import { useCalibration } from '../lib/useCalibration';
 import { stopSpeaking } from '../lib/metronome';
 import { usePreferences } from '../lib/usePreferences';
+import { getStoredName } from '../lib/device';
 import { ScoreView } from '../components/ScoreView';
 import { TransportBar } from '../components/TransportBar';
 import { TrackPicker } from '../components/TrackPicker';
@@ -12,6 +13,7 @@ import { SettingsPanel } from '../components/SettingsPanel';
 import { SongLoader } from '../components/SongLoader';
 import { Notices } from '../components/Notices';
 import { CalibrationPanel } from '../components/CalibrationPanel';
+import { JoinDialog } from '../components/JoinDialog';
 import { ViewPanel } from '../components/ViewPanel';
 import { TunerPanel } from '../components/TunerPanel';
 
@@ -24,6 +26,9 @@ export function SessionPage({ roomId }: Props) {
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
   const [preferences, setPreferences] = usePreferences();
+  // Asked once per tab. Joining happens regardless, so the room loads behind
+  // the dialog and answering is just a rename.
+  const [needsName, setNeedsName] = useState(() => getStoredName() === null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const onContainer = useCallback((element: HTMLElement | null) => {
@@ -199,6 +204,15 @@ export function SessionPage({ roomId }: Props) {
           />
         </aside>
       </div>
+
+      {needsName && (
+        <JoinDialog
+          onConfirm={(name) => {
+            room.rename(name);
+            setNeedsName(false);
+          }}
+        />
+      )}
 
       <Notices notices={room.notices} onDismiss={room.dismissNotice} />
     </div>

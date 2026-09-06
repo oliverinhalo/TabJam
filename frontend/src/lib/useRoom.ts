@@ -11,7 +11,8 @@ import {
   type ServerToClientEvents,
   type TransportState,
 } from '@tabjam/shared';
-import { getDeviceId, getDeviceName, setDeviceName } from './device';
+import { getDeviceId, getDeviceName, regenerateDeviceId, setDeviceName } from './device';
+import { openTabChannel } from './tabs';
 import { ClockSync, RESYNC_INTERVAL_MS, estimateClockOffset } from './clock';
 
 type TabJamSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -111,7 +112,9 @@ export interface CalibrationRoundResult {
  * truth instead of a local guess that has to be reconciled later.
  */
 export function useRoom(roomId: string): RoomApi {
-  const deviceId = useMemo(getDeviceId, []);
+  // Identity can change: a duplicated tab arrives holding another tab's id and
+  // has to take a new one, which re-runs the join below.
+  const [deviceId, setDeviceId] = useState(getDeviceId);
   const [name, setName] = useState(getDeviceName);
 
   const socketRef = useRef<TabJamSocket | null>(null);
@@ -125,6 +128,8 @@ export function useRoom(roomId: string): RoomApi {
   const [settings, setSettings] = useState<RoomSettings>(DEFAULT_SETTINGS);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [audioOutputDeviceIds, setAudioOutputDeviceIds] = useState<string[]>([]);
+  const audioOutputRef = useRef<string[]>([]);
+  const channelRef = useRef<ReturnType<typeof openTabChannel>>(null);
   const [referenceLatencyMs, setReferenceLatencyMs] = useState(0);
   const [notices, setNotices] = useState<Notice[]>([]);
 
@@ -132,6 +137,9 @@ export function useRoom(roomId: string): RoomApi {
   // nothing: the upload succeeds over REST, the room never hears about it, and
   // the UI just keeps saying "No song loaded".
   const pendingSongRef = useRef<ResolvedSong | null>(null);
+
+  const deviceIdRef = useRef(deviceId);
+  deviceIdRef.current = deviceId;
 
   const clockRef = useRef(new ClockSync());
   const [clockSynced, setClockSynced] = useState(false);
@@ -158,6 +166,7 @@ export function useRoom(roomId: string): RoomApi {
     setSettings(state.settings);
     setParticipants(state.participants);
     setAudioOutputDeviceIds(state.audioOutputDeviceIds);
+    audioOutputRef.current = state.audioOutputDeviceIds;
     setReferenceLatencyMs(state.referenceLatencyMs);
   }, []);
 
@@ -236,6 +245,7 @@ export function useRoom(roomId: string): RoomApi {
     });
     socket.on('audioOutput', ({ audioOutputDeviceIds: next, referenceLatencyMs: ref }) => {
       setAudioOutputDeviceIds(next);
+      audioOutputRef.current = next;
       setReferenceLatencyMs(ref);
     });
     socket.on('notice', ({ level, message }) => pushNotice(level, message));
@@ -257,6 +267,33 @@ export function useRoom(roomId: string): RoomApi {
       socketRef.current = null;
     };
   }, [roomId, deviceId, applySnapshot, pushNotice]);
+
+  /**
+   * Keep tabs of this browser from tripping over each other.
+   *
+   * They share one set of speakers, so only one may produce sound however many
+   * are in the room; and a duplicated tab copies its id along with the rest of
+   * its session, which would put two participants under one identity again.
+   */
+  useEffect(() => {
+    const channel = openTabChannel(() => deviceIdRef.current, {
+      onIdClash: () => setDeviceId(regenerateDeviceId()),
+      onAudioTakenElsewhere: () => {
+        // Only meaningful if this tab currently holds the role.
+        if (audioOutputRef.current.includes(deviceIdRef.current)) {
+          socketRef.current?.emit('releaseAudioOutput');
+          pushNotice('info', 'Another tab on this device took over the audio.');
+        }
+      },
+    });
+    channelRef.current = channel;
+    channel?.announcePresence(deviceId);
+
+    return () => {
+      channel?.close();
+      channelRef.current = null;
+    };
+  }, [deviceId, pushNotice]);
 
   const emit = useCallback(
     <E extends keyof ClientToServerEvents>(
@@ -319,7 +356,11 @@ export function useRoom(roomId: string): RoomApi {
     reportPosition: (positionMs, isPlaying) =>
       emit('positionReport', { positionMs, isPlaying }),
     updateSettings: (patch) => emit('updateSettings', patch),
-    claimAudioOutput: () => emit('claimAudioOutput'),
+    claimAudioOutput: () => {
+      emit('claimAudioOutput');
+      // Tell the other tabs here to stand down before they double the sound.
+      channelRef.current?.announceAudio(deviceId);
+    },
     releaseAudioOutput: () => emit('releaseAudioOutput'),
 
     clock: clockRef.current,

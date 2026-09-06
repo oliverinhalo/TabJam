@@ -726,3 +726,28 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
   color: var(--text-dim);
   margin-top: 4px;
 }
+
+/* --- Join dialog --------------------------------------------------------- */
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.dialog__panel {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.dialog__title { font-size: 19px; margin-bottom: 6px; }
+.dialog__hint { color: var(--text-dim); font-size: 13px; margin: 0 0 16px; }
+.dialog__actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.dialog__actions .button { width: 100%; }
