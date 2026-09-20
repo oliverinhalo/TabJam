@@ -3,12 +3,14 @@ import {
   DEFAULT_TRACK_SETTINGS,
   MAX_CAPO_FRET,
   MAX_TRANSPOSE_SEMITONES,
+  MIN_CAPO_FRET,
   trackSettings,
   type RoomSettings,
   type TrackInfo,
   type TrackSettings,
 } from '@tabjam/shared';
 import { Stepper, formatSemitones } from './Stepper';
+import { formatCapo, formatCapoBadge } from '../lib/format';
 
 interface Props {
   tracks: TrackInfo[];
@@ -94,7 +96,9 @@ export function TrackPicker({
                   {track.name}
                 </span>
 
-                {own.capo > 0 && <span className="badge">capo {own.capo}</span>}
+                {own.capo !== 0 && (
+                  <span className="badge">{formatCapoBadge(own.capo)}</span>
+                )}
                 {own.transposeSemitones !== 0 && (
                   <span className="badge">{formatSemitones(own.transposeSemitones)}</span>
                 )}
@@ -131,11 +135,15 @@ export function TrackPicker({
                   <Stepper
                     label="Capo"
                     value={own.capo}
-                    min={0}
+                    min={MIN_CAPO_FRET}
                     max={MAX_CAPO_FRET}
                     onChange={(capo) => patchTrack(track.index, { capo })}
-                    format={(v) => (v === 0 ? 'none' : `fret ${v}`)}
-                    title="Renumbers the frets to what you actually press. Does not change the pitch."
+                    format={formatCapo}
+                    title={
+                      'Renumbers the frets to what you actually press; the pitch ' +
+                      'is unchanged. Negative means your instrument is tuned down — ' +
+                      'in Eb standard reading an E standard tab, use 1 down.'
+                    }
                   />
                   <Stepper
                     label="Transpose"

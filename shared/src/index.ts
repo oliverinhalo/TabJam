@@ -99,11 +99,17 @@ export interface TrackSettings {
    */
   transposeSemitones: number;
   /**
-   * Capo position in frets.
+   * Capo position in frets. May be negative.
    *
    * Distinct from transposing: a capo leaves the sounding pitch alone and
    * renumbers the frets, so a part written at fret 5 reads as fret 3 with a
    * capo on 2 — what the player actually has to press.
+   *
+   * Negative values mean the instrument is tuned *down* rather than clamped
+   * up, which is the same idea pointed the other way: a guitar in Eb standard
+   * reading a tab written for E standard has to fret everything one higher to
+   * sound the written pitch, so capo -1 shows fret 6 where the tab says 5. It
+   * lets someone play along in the room's key without retuning.
    */
   capo: number;
   muted: boolean;
@@ -393,6 +399,14 @@ export const DEFAULT_SETTINGS: RoomSettings = {
 export const MAX_TRANSPOSE_SEMITONES = 12;
 /** Highest capo position offered. Beyond this there is not much neck left. */
 export const MAX_CAPO_FRET = 12;
+/**
+ * Lowest capo position offered.
+ *
+ * Negative is a capo pointing the other way: the instrument is tuned down, so
+ * the frets to press are higher than the ones written. A full octave covers
+ * anything from Eb standard to the deeper drop tunings.
+ */
+export const MIN_CAPO_FRET = -12;
 
 /** Resolve a track's settings, falling back to defaults. */
 export function trackSettings(
@@ -421,9 +435,12 @@ export function effectiveTranspose(
  * the capo.
  *
  * A capo at fret 2 means every note is fretted two lower than written while
- * sounding the same, so the tab has to read two lower. Pairing this with
- * {@link effectiveTranspose} for the audio is what separates the two: what you
- * read moves, what you hear does not.
+ * sounding the same, so the tab has to read two lower. A negative capo is the
+ * same subtraction with the sign flipped: tuned down a semitone, capo -1 adds
+ * one to every fret so the written pitch still comes out.
+ *
+ * Pairing this with {@link effectiveTranspose} for the audio is what separates
+ * the two: what you read moves, what you hear does not.
  */
 export function displayTranspose(
   settings: RoomSettings,

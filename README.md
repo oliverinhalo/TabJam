@@ -292,6 +292,18 @@ press with a capo on, and the pitch is unchanged — put a capo on 2 and a part
 written at fret 5 reads as fret 3, sounding exactly as before. It is per track,
 because only some of you have a capo on.
 
+**A negative capo** is the same idea pointed the other way: your instrument is
+tuned *down*, so the frets you press are higher than the ones written. In Eb
+standard reading a tab written for E standard, set the capo to **1 down** and
+fret 5 reads as fret 6. The room keeps playing in the written key, so you play
+along with everyone else without retuning. Deeper drop tunings work the same
+way — 2 down for a whole tone, and so on.
+
+Neither direction touches the audio: only the transpose is heard. That
+separation is what lets a capo be a reading aid rather than a key change, and
+`npm test` pins the sign convention down, since getting it backwards still
+produces plausible-looking fret numbers.
+
 Both use steppers rather than sliders. A slider fires a change per pixel of a
 drag, and each one costs a room-wide round trip and a full score re-render, so
 the value you land on could be lost in the queue — which looks exactly like a

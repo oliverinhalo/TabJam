@@ -4,6 +4,7 @@ import {
   DEFAULT_TRACK_SETTINGS,
   MAX_CALIBRATION_OFFSET_MS,
   MAX_CAPO_FRET,
+  MIN_CAPO_FRET,
   MAX_TRANSPOSE_SEMITONES,
   type Participant,
   type ResolvedSong,
@@ -419,7 +420,7 @@ function sanitizeTracks(
           MAX_TRANSPOSE_SEMITONES
         )
       ),
-      capo: Math.round(clamp(Number(value.capo ?? 0), 0, MAX_CAPO_FRET)),
+      capo: Math.round(clamp(Number(value.capo ?? 0), MIN_CAPO_FRET, MAX_CAPO_FRET)),
       muted: Boolean(value.muted),
       solo: Boolean(value.solo),
       volume: clamp(Number(value.volume ?? DEFAULT_TRACK_SETTINGS.volume), 0, 1),
